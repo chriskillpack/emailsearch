@@ -82,6 +82,8 @@ func ComputeIndex(filename string, data []byte) (LocalIndex, error) {
 	// TODO - offsets are in email body not from start of file
 	var s scanner.Scanner
 	s.Init(bytes.NewReader(body))
+	s.Error = func(_ *scanner.Scanner, _ string) {} // Do not report messages to stderr
+
 	for tok := s.Scan(); tok != scanner.EOF; tok = s.Scan() {
 		txt := s.TokenText()
 		if _, ok := index[txt]; !ok {
@@ -154,15 +156,22 @@ func (c *Corpus) Serialize(dir string) error {
 	if err != nil {
 		return err
 	}
+	defer f.Close()
 
 	wordCorpusOffsets := make([]BinaryWordCorpusOffset, len(c.wordIndex))
 	wcocounter := 0
 
+	out := &bytes.Buffer{}
+
 	bc := BinaryCorpus{Version: 1, NumEntries: int64(len(c.wordIndex))}
-	binary.Write(f, binary.BigEndian, bc)
+	binary.Write(out, binary.BigEndian, bc)
+	out.WriteTo(f)
+
 	bw := BinaryWord{}
 	bm := BinaryMatch{}
 	for word, matches := range c.wordIndex {
+		out.Reset()
+
 		widx, _ := c.words.Index(word)
 		wordCorpusOffsets[wcocounter].WordIndex = int32(widx)
 		foff, _ := f.Seek(0, io.SeekCurrent)
@@ -172,19 +181,21 @@ func (c *Corpus) Serialize(dir string) error {
 		bw.NumMatches = int32(len(matches))
 		bw.WordLen = int32(len(word))
 		bw.Word = word
-		binary.Write(f, binary.BigEndian, bw)
+		binary.Write(out, binary.BigEndian, bw)
 
 		for i := range matches {
 			bm.FilenameIndex = int32(matches[i].FilenameStringIndex)
 			bm.NumOffsets = int32(len(matches[i].Offsets))
-			binary.Write(f, binary.BigEndian, bm)
+			binary.Write(out, binary.BigEndian, bm)
 
 			offsets := make([]int32, len(matches[i].Offsets))
 			for j, off := range matches[i].Offsets {
 				offsets[j] = int32(off)
 			}
-			binary.Write(f, binary.BigEndian, offsets)
+			binary.Write(out, binary.BigEndian, offsets)
 		}
+
+		out.WriteTo(f)
 	}
 	f.Close()
 	fmt.Println("Serialized index")
@@ -225,20 +236,36 @@ func (c *Corpus) Serialize(dir string) error {
 	return nil
 }
 
-// Persists the given string set to filepath
-// The file is text based using the schema
-// {INDEX}: {STRING}
+type FileStringTableHeader struct {
+	NumStrings int32
+
+	// Followed by each string one after the other
+	// Each string is of the form byte length (int16) and then the bytes of the string
+	// Strings are stored as UTF-8
+}
+
+// Persists the stringset ss to filepath
+// The format is binary
 func serializeStringSet(ss *StringSet, filepath string) error {
+	filenames := ss.Flatten()
+	out := &bytes.Buffer{}
+
+	if err := binary.Write(out, binary.BigEndian, int32(len(filenames))); err != nil {
+		return err
+	}
+
+	for _, filename := range filenames {
+		binary.Write(out, binary.BigEndian, int16(len(filename)))
+		out.WriteString(filename)
+	}
+
 	f, err := os.Create(filepath)
 	if err != nil {
 		return err
 	}
-	filenames := ss.Flatten()
-	fmt.Fprintf(f, "%d\n", len(filenames))
-	for i, filename := range filenames {
-		fmt.Fprintf(f, "%d: %s\n", i, filename)
-	}
+	out.WriteTo(f)
 	f.Close()
+
 	return nil
 }
 
@@ -268,34 +295,36 @@ func (c *Corpus) MergeInLocalIndex(localIndex LocalIndex, filename string) {
 	}
 }
 
-func Walk(paths ...string) ([]string, int64, error) {
+// Walk a path of the filesystem and return the set of files in that path
+// The names of the files are relative to the walk path, so Walk("/home/chris")
+// will return ["foo/cat.txt"] for /home/chris/foo/cat.txt
+func Walk(path string) ([]string, int64, error) {
 	files := []string{}
 
-	var err error
 	var maxSize int64
-	for i := range paths {
-		err = filepath.WalkDir(paths[i], func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-
-			if d.IsDir() {
-				return nil
-			}
-
-			finfo, err := d.Info()
-			if err != nil {
-				return err
-			}
-			maxSize = max(maxSize, finfo.Size())
-			files = append(files, path)
-
-			return nil
-		})
+	err := filepath.WalkDir(path, func(wpath string, d fs.DirEntry, err error) error {
 		if err != nil {
-			break
+			return err
 		}
-	}
+
+		if d.IsDir() {
+			return nil
+		}
+
+		finfo, err := d.Info()
+		if err != nil {
+			return err
+		}
+		maxSize = max(maxSize, finfo.Size())
+
+		relpath, err := filepath.Rel(path, wpath)
+		if err != nil {
+			return err
+		}
+
+		files = append(files, relpath)
+		return nil // Continue walking
+	})
 
 	return files, maxSize, err
 }
