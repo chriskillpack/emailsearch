@@ -6,6 +6,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 
 	"github.com/chriskillpack/column"
@@ -14,16 +16,17 @@ import (
 var (
 	flagInputPath = flag.String("emails", "/Users/chris/enron_emails/maildir", "directory of emails")
 	flagOutDir    = flag.String("out", "./out", "directory to place generated files")
-	flagThreads   = flag.Int("threads", 5, "threads to use")
-	flagMaxFiles  = flag.Int("maxfiles", -1, "maximum number of files to inject, -1 to disable limit")
+	flagThreads   = flag.Int("threads", 10, "threads to use")
+	flagMaxFiles  = flag.Uint("maxfiles", 0, "maximum number of files to inject, 0 to disable limit")
 
 	verboseOutput bool
 )
 
-type ProcessedFile struct {
-	File  string
-	Index column.LocalIndex
-	Err   error
+// Holds the output of one of the injestion workers
+type InjestedFile struct {
+	Filename string
+	Index    column.LocalIndex
+	Err      error
 }
 
 func verbose(format string, a ...any) {
@@ -48,22 +51,21 @@ func main() {
 	}
 	verbose("Found %d files\n", len(files))
 
-	maxFiles := len(files)
-	if *flagMaxFiles >= 0 {
-		maxFiles = *flagMaxFiles
+	maxFiles := uint(len(files))
+	if *flagMaxFiles > 0 {
+		maxFiles = min(*flagMaxFiles, maxFiles)
 		verbose("Only injesting first %d files\n", maxFiles)
 	}
 
 	nThreads := *flagThreads
 
 	inCh := make(chan string, *flagThreads)
-	outCh := make(chan ProcessedFile)
+	outCh := make(chan InjestedFile)
 
-	// Send data into the workers
 	var wg sync.WaitGroup
 	wg.Add(nThreads)
 
-	// Spin up the worker "threads"
+	// Spin up the worker "threads" (goroutines)
 	for _ = range nThreads {
 		// Each worker gets it's own scratch buffer to load file data into. This
 		// is an attempt to reduce churn in the GC. The scratch buffer is sized
@@ -73,10 +75,13 @@ func main() {
 		go func(scratch []byte) {
 			defer wg.Done()
 
+			// Each worker pulls a filename of an email from the input channel,
+			// builds a LocalIndex of the email body and then sends result
+			// through the output channel.
 			for work := range inCh {
 				filep := filepath.Join(*flagInputPath, work)
 
-				outData := ProcessedFile{File: work}
+				outData := InjestedFile{Filename: work}
 				var n int
 				f, err := os.Open(filep)
 				if err != nil {
@@ -98,10 +103,8 @@ func main() {
 		}(scratch)
 	}
 
-	wg.Add(1)
+	// Spin up a goroutine to insert the filenames
 	go func() {
-		defer wg.Done()
-
 		for i, file := range files[0:maxFiles] {
 			if i == 0 || ((i % 10000) == 0) || i == len(files[0:maxFiles])-1 {
 				verbose("%d -> %s\n", i, file)
@@ -112,19 +115,32 @@ func main() {
 		close(inCh)
 	}()
 
+	// Spin up a goroutine to wait for the worker and insertion goroutine to
+	// be complete and then close the output channel to indicate that there
+	// are no more results.
 	go func() {
 		wg.Wait()
 		close(outCh)
 	}()
 
-	// Tnis is all single threaded for now
-	corpus := column.NewCorpus()
+	// Retrieve the injested results and sort for a deterministic building of
+	// the main index.
+	injested := make([]InjestedFile, 0, maxFiles)
 	for result := range outCh {
+		injested = append(injested, result)
+	}
+	slices.SortFunc(injested, func(a, b InjestedFile) int {
+		return strings.Compare(a.Filename, b.Filename)
+	})
+
+	// This is all single threaded for now
+	corpus := column.NewCorpus()
+	for _, result := range injested {
 		if result.Err == nil {
 			// Merge the local index into the main index
-			corpus.MergeInLocalIndex(result.Index, result.File)
+			corpus.MergeInLocalIndex(result.Index, result.Filename)
 		} else {
-			fmt.Printf("Encountered error processing %s\n", result.File)
+			fmt.Printf("Encountered error processing %s\n", result.Filename)
 		}
 	}
 
