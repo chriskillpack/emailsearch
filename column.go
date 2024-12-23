@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"net/mail"
 	"os"
 	"path/filepath"
+	"slices"
 	"text/scanner"
-
-	"github.com/elliotchance/orderedmap/v3"
 )
 
 type Match struct {
@@ -20,11 +20,11 @@ type Match struct {
 }
 
 // LocalIndex tracks the positions of words in a specific file
-type LocalIndex *orderedmap.OrderedMap[string, []int]
+type LocalIndex map[string][]int
 
 // WordIndex is the global index for all the files in the corpus
 // As such it tracks more information than LocalIndex does.
-type WordIndex *orderedmap.OrderedMap[string, []Match]
+type WordIndex map[string][]Match
 
 type Corpus struct {
 	filenames *StringSet
@@ -62,7 +62,7 @@ func NewCorpus() *Corpus {
 	c := &Corpus{
 		filenames: NewStringSet(),
 		words:     NewStringSet(),
-		wordIndex: orderedmap.NewOrderedMap[string, []Match](),
+		wordIndex: make(WordIndex),
 	}
 	return c
 }
@@ -79,7 +79,7 @@ func ComputeIndex(filename string, data []byte) (LocalIndex, error) {
 		return nil, err
 	}
 
-	index := orderedmap.NewOrderedMap[string, []int]()
+	index := make(LocalIndex)
 
 	// TODO - offsets are in email body not from start of file
 	var s scanner.Scanner
@@ -88,11 +88,10 @@ func ComputeIndex(filename string, data []byte) (LocalIndex, error) {
 
 	for tok := s.Scan(); tok != scanner.EOF; tok = s.Scan() {
 		txt := s.TokenText()
-		if _, ok := index.Get(txt); !ok {
-			index.Set(txt, []int{s.Position.Offset})
+		if _, ok := index[txt]; !ok {
+			index[txt] = []int{s.Position.Offset}
 		} else {
-			matches, _ := index.Get(txt)
-			index.Set(txt, append(matches, s.Position.Offset))
+			index[txt] = append(index[txt], s.Position.Offset)
 		}
 	}
 
@@ -161,18 +160,22 @@ func (c *Corpus) Serialize(dir string) error {
 	}
 	defer f.Close()
 
-	wordCorpusOffsets := make([]BinaryWordCorpusOffset, (*c.wordIndex).Len())
+	wordCorpusOffsets := make([]BinaryWordCorpusOffset, len(c.wordIndex))
 	wcocounter := 0
 
 	out := &bytes.Buffer{}
 
-	bc := BinaryCorpus{Version: 1, NumEntries: int64((*c.wordIndex).Len())}
+	bc := BinaryCorpus{Version: 1, NumEntries: int64(len(c.wordIndex))}
 	binary.Write(out, binary.BigEndian, bc)
 	out.WriteTo(f)
 
+	sortedWords := slices.Sorted(maps.Keys(c.wordIndex))
+
 	bw := BinaryWord{}
 	bm := BinaryMatch{}
-	for word, matches := range (*c.wordIndex).AllFromFront() {
+	for _, word := range sortedWords {
+		matches := c.wordIndex[word]
+
 		out.Reset()
 
 		widx, _ := c.words.Index(word)
@@ -286,15 +289,16 @@ func createOutDir(dir string) error {
 func (c *Corpus) MergeInLocalIndex(localIndex LocalIndex, filename string) {
 	fidx := c.filenames.Insert(filename)
 
-	for word, offsets := range (*localIndex).AllFromFront() {
+	sortedWords := slices.Sorted(maps.Keys(localIndex))
+	for _, word := range sortedWords {
+		offsets := localIndex[word]
 		c.words.Insert(word)
 
-		if _, ok := (*c.wordIndex).Get(word); !ok {
+		if _, ok := c.wordIndex[word]; !ok {
 			// If the word is not in the corpus, add the word to the index
-			(*c.wordIndex).Set(word, []Match{{fidx, offsets}})
+			c.wordIndex[word] = []Match{{fidx, offsets}}
 		} else {
-			matches, _ := (*c.wordIndex).Get(word)
-			(*c.wordIndex).Set(word, append(matches, Match{fidx, offsets}))
+			c.wordIndex[word] = append(c.wordIndex[word], Match{fidx, offsets})
 		}
 	}
 }
