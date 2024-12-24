@@ -1,5 +1,19 @@
 package column
 
+import (
+	"bytes"
+	"encoding/binary"
+	"os"
+)
+
+type serializedStringSetHeader struct {
+	NumStrings int32
+
+	// Followed by each string one after the other
+	// Each string is of the form byte length (int16) and then the bytes of the string
+	// Strings are stored as UTF-8
+}
+
 type StringSet struct {
 	strings map[string]int
 	index   int
@@ -37,4 +51,28 @@ func (ss *StringSet) Flatten() []string {
 	}
 
 	return sa
+}
+
+// Persists the stringset to filepath. The format is binary.
+func (ss *StringSet) Serialize(filepath string) error {
+	filenames := ss.Flatten()
+	out := &bytes.Buffer{}
+
+	if err := binary.Write(out, binary.BigEndian, int32(len(filenames))); err != nil {
+		return err
+	}
+
+	for _, filename := range filenames {
+		binary.Write(out, binary.BigEndian, int16(len(filename)))
+		out.WriteString(filename)
+	}
+
+	f, err := os.Create(filepath)
+	if err != nil {
+		return err
+	}
+	out.WriteTo(f)
+	f.Close()
+
+	return nil
 }
