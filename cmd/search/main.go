@@ -1,11 +1,9 @@
 package main
 
 import (
-	"fmt"
-
-	_ "github.com/chriskillpack/column"
+	"github.com/chriskillpack/column"
 )
 
 func main() {
-	fmt.Println("Hello")
+	column.LoadIndexFromDisk("out/")
 }

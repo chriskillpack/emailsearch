@@ -67,6 +67,11 @@ The search algorithm would take each word and look it up in `words.sid` to retri
 
 * Add email headers to the corpus as part of the search time.
 
+# TODO
+
+* Use varint encoding for string lengths in serialized string sets
+* Go 1.23 introduced string interning. Use that to reduces index generation working memory size (currently > 18Gbs).
+
 # Performance improvements
 
 * Parallelization of email injestion greatly improved performance. This also includes the binary string set file format as well:

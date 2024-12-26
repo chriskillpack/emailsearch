@@ -3,11 +3,17 @@ package column
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
+	"math"
 	"os"
 )
 
+var errTooBigToSave = errors.New("the capacity of the stringset exceeds disk format")
+
 type serializedStringSetHeader struct {
-	NumStrings int32
+	Version  uint32 // currently 1
+	NStrings uint32
+	MaxLen   uint16
 
 	// Followed by each string one after the other
 	// Each string is of the form byte length (int16) and then the bytes of the string
@@ -44,30 +50,41 @@ func (ss *StringSet) Index(s string) (int, bool) {
 }
 
 // Flattens the set and returns it as an array of strings in insertion order
-func (ss *StringSet) Flatten() []string {
+func (ss *StringSet) Flatten() ([]string, int) {
+	maxlen := 0
 	sa := make([]string, len(ss.strings))
 	for str, index := range ss.strings {
 		sa[index] = str
+		maxlen = max(maxlen, len(str))
 	}
 
-	return sa
+	return sa, maxlen
 }
 
 // Persists the stringset to filepath. The format is binary.
-func (ss *StringSet) Serialize(filepath string) error {
-	filenames := ss.Flatten()
+func (ss *StringSet) Serialize(outpath string) error {
+	strings, maxlen := ss.Flatten()
 	out := &bytes.Buffer{}
 
-	if err := binary.Write(out, binary.BigEndian, int32(len(filenames))); err != nil {
+	if len(strings) > math.MaxUint32 || maxlen >= math.MaxUint16 {
+		return errTooBigToSave
+	}
+
+	hdr := serializedStringSetHeader{
+		Version:  1,
+		NStrings: uint32(len(strings)),
+		MaxLen:   uint16(maxlen),
+	}
+	if err := binary.Write(out, binary.BigEndian, &hdr); err != nil {
 		return err
 	}
 
-	for _, filename := range filenames {
-		binary.Write(out, binary.BigEndian, int16(len(filename)))
-		out.WriteString(filename)
+	for _, str := range strings {
+		binary.Write(out, binary.BigEndian, int16(len(str)))
+		out.WriteString(str)
 	}
 
-	f, err := os.Create(filepath)
+	f, err := os.Create(outpath)
 	if err != nil {
 		return err
 	}

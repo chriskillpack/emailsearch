@@ -9,11 +9,21 @@ import (
 	"net/mail"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
-	"text/scanner"
 )
+
+const (
+	FilenamesStringTable = "filenames.sid"
+	WordsStringTable     = "words.sid"
+	CorpusIndex          = "corpus.index"
+	IndexWordOffsets     = "word.offsets"
+)
+
+// RE to split on spaces and include ' in the word
+var emailWordsRe = regexp.MustCompile(`[^\s]+(?:'[^\s]+)*`)
 
 type IndexBuilder struct {
 	Verbose   bool
@@ -148,19 +158,16 @@ func (idx *IndexBuilder) computeFileIndex(filedata []byte) (fileIndex, error) {
 		return nil, err
 	}
 
+	// Find all the words in the email body
+	// It doesn't handle lines that end with =XX where XX is a number
 	index := make(fileIndex)
+	for _, word := range emailWordsRe.FindAllIndex(body, -1) {
+		txt := string(body[word[0]:word[1]])
 
-	// TODO - offsets are in email body not from start of file
-	var s scanner.Scanner
-	s.Init(bytes.NewReader(body))
-	s.Error = func(_ *scanner.Scanner, _ string) {} // Do not report messages to stderr
-
-	for tok := s.Scan(); tok != scanner.EOF; tok = s.Scan() {
-		txt := s.TokenText()
 		if _, ok := index[txt]; !ok {
-			index[txt] = []int{s.Position.Offset}
+			index[txt] = []int{word[0]}
 		} else {
-			index[txt] = append(index[txt], s.Position.Offset)
+			index[txt] = append(index[txt], word[0])
 		}
 	}
 
@@ -192,20 +199,20 @@ func (ib *IndexBuilder) Serialize(dir string) error {
 	}
 
 	// Filename stringset
-	if err := ib.filenames.Serialize(filepath.Join(dir, "filenames.sid")); err != nil {
-		return err
+	if err := ib.filenames.Serialize(filepath.Join(dir, FilenamesStringTable)); err != nil {
+		return fmt.Errorf("failed to serialize index: %w", err)
 	}
 	fmt.Println("Serialized filename stringset")
 
 	// Word stringset (redundant)
-	if err := ib.words.Serialize(filepath.Join(dir, "words.sid")); err != nil {
-		return err
+	if err := ib.words.Serialize(filepath.Join(dir, WordsStringTable)); err != nil {
+		return fmt.Errorf("failed to serialize: %w", err)
 	}
 	fmt.Println("Serialized word stringset")
 
-	f, err := os.Create(filepath.Join(dir, "corpus.index"))
+	f, err := os.Create(filepath.Join(dir, CorpusIndex))
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to serialize: %w", err)
 	}
 	defer f.Close()
 
@@ -255,9 +262,9 @@ func (ib *IndexBuilder) Serialize(dir string) error {
 	f.Close()
 	fmt.Println("Serialized index")
 
-	f, err = os.Create(filepath.Join(dir, "word.offsets"))
+	f, err = os.Create(filepath.Join(dir, IndexWordOffsets))
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to serialize: %w", err)
 	}
 	binary.Write(f, binary.BigEndian, wordCorpusOffsets)
 	f.Close()
