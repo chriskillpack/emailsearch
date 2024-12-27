@@ -79,8 +79,11 @@ func (ss *StringSet) Serialize(outpath string) error {
 		return err
 	}
 
+	scratch := [binary.MaxVarintLen16]byte{}
 	for _, str := range strings {
-		binary.Write(out, binary.BigEndian, int16(len(str)))
+		// Write out length as a varint
+		n := binary.PutUvarint(scratch[:], uint64(len(str)))
+		out.Write(scratch[0:n])
 		out.WriteString(str)
 	}
 

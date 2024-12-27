@@ -1,6 +1,7 @@
 package column
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"os"
@@ -63,14 +64,15 @@ func LoadIndexFromDisk(indexdir string) (*Index, error) {
 }
 
 func loadStringTable(filename string) ([]string, error) {
-	f, err := os.Open(filename)
-	defer f.Close()
+	data, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, err
 	}
 
+	buf := bytes.NewBuffer(data)
+
 	hdr := serializedStringSetHeader{}
-	if err = binary.Read(f, binary.BigEndian, &hdr); err != nil {
+	if err = binary.Read(buf, binary.BigEndian, &hdr); err != nil {
 		return nil, err
 	}
 	fmt.Printf("nstrings %d\n", hdr.NStrings)
@@ -81,10 +83,10 @@ func loadStringTable(filename string) ([]string, error) {
 
 	strings := make([]string, hdr.NStrings)
 	scratch := make([]byte, hdr.MaxLen)
+
 	for i := range hdr.NStrings {
-		var slen int16
-		binary.Read(f, binary.BigEndian, &slen)
-		binary.Read(f, binary.BigEndian, scratch[0:slen])
+		slen, _ := binary.ReadUvarint(buf)
+		buf.Read(scratch[0:slen])
 		strings[i] = string(scratch[0:slen])
 
 		fmt.Printf("%d: %d %q\n", i, slen, strings[i])
