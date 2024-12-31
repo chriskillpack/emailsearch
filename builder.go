@@ -23,6 +23,8 @@ const (
 )
 
 // RE to split on spaces and include ' in the word
+// TODO: try a regex that doesn't include trailing punctation such as ,?! and :
+// `[^\s]+(?:'[^\s]+)*(?<![.,:;!?"])`
 var emailWordsRe = regexp.MustCompile(`[^\s]+(?:'[^\s]+)*`)
 
 type IndexBuilder struct {
@@ -204,7 +206,7 @@ func (ib *IndexBuilder) Serialize(dir string) error {
 	}
 	fmt.Println("Serialized filename stringset")
 
-	// Word stringset (redundant)
+	// Word stringset
 	if err := ib.words.Serialize(filepath.Join(dir, WordsStringTable)); err != nil {
 		return fmt.Errorf("failed to serialize: %w", err)
 	}
@@ -217,17 +219,15 @@ func (ib *IndexBuilder) Serialize(dir string) error {
 	defer f.Close()
 
 	wordCorpusOffsets := make([]serializedWordIndexOffset, len(ib.wordIndex))
-	wcocounter := 0
 
 	out := &bytes.Buffer{}
 
-	bc := serializedIndexHeader{Version: 1, NumEntries: int64(len(ib.wordIndex))}
+	bc := serializedIndexHeader{Version: 1, NumEntries: uint64(len(ib.wordIndex))}
 	binary.Write(out, binary.BigEndian, bc)
 	out.WriteTo(f)
 
 	sortedWords := slices.Sorted(maps.Keys(ib.wordIndex))
 
-	bw := serializedWord{}
 	bm := serializedMatch{}
 	for _, word := range sortedWords {
 		matches := ib.wordIndex[word]
@@ -235,24 +235,21 @@ func (ib *IndexBuilder) Serialize(dir string) error {
 		out.Reset()
 
 		widx, _ := ib.words.Index(word)
-		wordCorpusOffsets[wcocounter].WordIndex = int32(widx)
-		foff, _ := f.Seek(0, io.SeekCurrent)
-		wordCorpusOffsets[wcocounter].Offset = foff
-		wcocounter++
+		wordCorpusOffsets[widx].WordIndex = int32(widx)
+		foff, _ := f.Seek(0, io.SeekCurrent) // TODO - replace with something else
+		wordCorpusOffsets[widx].Offset = foff
 
-		bw.NumMatches = int32(len(matches))
-		bw.WordLen = int32(len(word))
-		bw.Word = word
-		binary.Write(out, binary.BigEndian, bw)
+		binary.Write(out, binary.BigEndian, uint32(len(matches)))
 
 		for i := range matches {
-			bm.FilenameIndex = int32(matches[i].FilenameStringIndex)
-			bm.NumOffsets = int32(len(matches[i].Offsets))
+			bm.FilenameIndex = uint32(matches[i].FilenameStringIndex)
+			bm.NumOffsets = uint32(len(matches[i].Offsets))
 			binary.Write(out, binary.BigEndian, bm)
 
-			offsets := make([]int32, len(matches[i].Offsets))
+			// TODO - use varints for these offsets
+			offsets := make([]uint32, len(matches[i].Offsets))
 			for j, off := range matches[i].Offsets {
-				offsets[j] = int32(off)
+				offsets[j] = uint32(off)
 			}
 			binary.Write(out, binary.BigEndian, offsets)
 		}
@@ -262,15 +259,36 @@ func (ib *IndexBuilder) Serialize(dir string) error {
 	f.Close()
 	fmt.Println("Serialized index")
 
-	f, err = os.Create(filepath.Join(dir, IndexWordOffsets))
-	if err != nil {
+	if err = writeIndexOffsetsFile(wordCorpusOffsets, filepath.Join(dir, IndexWordOffsets)); err != nil {
 		return fmt.Errorf("failed to serialize: %w", err)
 	}
-	binary.Write(f, binary.BigEndian, wordCorpusOffsets)
-	f.Close()
 	fmt.Println("Serialized word offsets")
 
 	return nil
+}
+
+func writeIndexOffsetsFile(wordCorpusOffsets []serializedWordIndexOffset, filename string) error {
+	buf := &bytes.Buffer{}
+
+	hdr := serializedWordOffsetHeader{
+		Version:    1,
+		NumEntries: uint32(len(wordCorpusOffsets)),
+	}
+	if err := binary.Write(buf, binary.BigEndian, &hdr); err != nil {
+		return err
+	}
+	if err := binary.Write(buf, binary.BigEndian, wordCorpusOffsets); err != nil {
+		return err
+	}
+
+	f, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	_, err = buf.WriteTo(f)
+	f.Close()
+
+	return err
 }
 
 func createOutDir(dir string) error {
