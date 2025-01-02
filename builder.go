@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"unique"
 )
 
 const (
@@ -26,6 +27,13 @@ const (
 // TODO: try a regex that doesn't include trailing punctation such as ,?! and :
 // `[^\s]+(?:'[^\s]+)*(?<![.,:;!?"])`
 var emailWordsRe = regexp.MustCompile(`[^\s]+(?:'[^\s]+)*`)
+
+// fileIndex tracks the positions of words in a specific file
+type fileIndex map[unique.Handle[string]][]int
+
+// wordIndex is the global index for all the files in the corpus
+// As such it tracks more information than LocalIndex does.
+type wordIndex map[unique.Handle[string]][]match
 
 type IndexBuilder struct {
 	Verbose   bool
@@ -164,7 +172,7 @@ func (idx *IndexBuilder) computeFileIndex(filedata []byte) (fileIndex, error) {
 	// It doesn't handle lines that end with =XX where XX is a number
 	index := make(fileIndex)
 	for _, word := range emailWordsRe.FindAllIndex(body, -1) {
-		txt := string(body[word[0]:word[1]])
+		txt := unique.Make(string(body[word[0]:word[1]]))
 
 		if _, ok := index[txt]; !ok {
 			index[txt] = []int{word[0]}
@@ -179,10 +187,13 @@ func (idx *IndexBuilder) computeFileIndex(filedata []byte) (fileIndex, error) {
 func (c *IndexBuilder) MergeInFileIndex(fileIndex fileIndex, filename string) {
 	fidx := c.filenames.Insert(filename)
 
-	sortedWords := slices.Sorted(maps.Keys(fileIndex))
+	sortedWords := slices.SortedFunc(maps.Keys(fileIndex), func(a, b unique.Handle[string]) int {
+		return strings.Compare(a.Value(), b.Value())
+	})
+
 	for _, word := range sortedWords {
 		offsets := fileIndex[word]
-		c.words.Insert(word)
+		c.words.Insert(word.Value())
 
 		if _, ok := c.wordIndex[word]; !ok {
 			// If the word is not in the corpus, add the word to the index
@@ -226,7 +237,9 @@ func (ib *IndexBuilder) Serialize(dir string) error {
 	binary.Write(out, binary.BigEndian, bc)
 	out.WriteTo(f)
 
-	sortedWords := slices.Sorted(maps.Keys(ib.wordIndex))
+	sortedWords := slices.SortedFunc(maps.Keys(ib.wordIndex), func(a, b unique.Handle[string]) int {
+		return strings.Compare(a.Value(), b.Value())
+	})
 
 	bm := serializedMatch{}
 	for _, word := range sortedWords {
@@ -234,7 +247,7 @@ func (ib *IndexBuilder) Serialize(dir string) error {
 
 		out.Reset()
 
-		widx, _ := ib.words.Index(word)
+		widx, _ := ib.words.Index(word.Value())
 		wordCorpusOffsets[widx].WordIndex = int32(widx)
 		foff, _ := f.Seek(0, io.SeekCurrent) // TODO - replace with something else
 		wordCorpusOffsets[widx].Offset = foff
