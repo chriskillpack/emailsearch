@@ -70,7 +70,7 @@ The search algorithm would take each word and look it up in `words.sid` to retri
 # TODO
 
 * Use varint encoding for string lengths in serialized string sets
-* Go 1.23 introduced string interning. Use that to reduces index generation working memory size (currently > 18Gbs).
+* Go 1.23 introduced string interning. Use that to reduces index generation working memory size. Currently max RSS usage on full maildir is 6370Mb.
 
 # Performance improvements
 
