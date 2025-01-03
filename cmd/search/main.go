@@ -36,7 +36,8 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	srv := NewServer("8080")
+	srv := NewServer(idx, "8080")
+
 	go func() {
 		if err := srv.Start(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Server failed to start: %s", err)
