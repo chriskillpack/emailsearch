@@ -4,9 +4,11 @@ import (
 	"context"
 	"embed"
 	"html/template"
+	"log"
 	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/chriskillpack/column"
 )
@@ -74,8 +76,10 @@ func (s *Server) serveSearch() http.HandlerFunc {
 			return
 		}
 
+		start := time.Now()
 		queryparts := strings.Split(query[0], " ")
 		queryresults, err := s.Index.QueryIndex(queryparts)
+		end := time.Now()
 		if err != nil {
 			w.Header().Set("Cache-Control", "no-store, no-cache")
 			w.WriteHeader(http.StatusInternalServerError)
@@ -85,11 +89,16 @@ func (s *Server) serveSearch() http.HandlerFunc {
 		w.Header().Set("Cache-Control", "no-store, no-cache")
 		w.WriteHeader(http.StatusOK)
 
+		duration := end.Sub(start)
 		data := struct {
-			Query   string
-			Results []column.QueryResults
-		}{query[0], queryresults}
-		resultsPartialTmpl.Execute(w, data)
+			Query        string
+			NumResults   int
+			ResponseTime string
+			Results      []column.QueryResults
+		}{query[0], len(queryresults), duration.String(), queryresults[:min(len(queryresults), 10)]}
+		if err := resultsPartialTmpl.Execute(w, data); err != nil {
+			log.Printf("Error! %s\n", err)
+		}
 	}
 }
 

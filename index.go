@@ -188,9 +188,9 @@ func (idx *Index) QueryIndex(querywords []string) ([]QueryResults, error) {
 		lb := len(b.WordMatches)
 
 		if la < lb {
-			return -1
-		} else if la > lb {
 			return 1
+		} else if la > lb {
+			return -1
 		}
 
 		// Same number of matches, tie-breaker: filenames lexicographically
