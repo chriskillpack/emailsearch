@@ -4,9 +4,13 @@ import (
 	"context"
 	"embed"
 	"html/template"
+	"io"
 	"log"
 	"net"
 	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -27,16 +31,22 @@ var (
 type Server struct {
 	hs *http.Server
 
-	Index *column.Index
+	Index      *column.Index
+	EmailsRoot string
 }
 
 func init() {
+	funcMap := template.FuncMap{
+		"pathescape": func(value string) string {
+			return url.PathEscape(value)
+		},
+	}
 	indexTmpl = template.Must(template.ParseFS(tmplFS, "tmpl/index.html"))
-	resultsPartialTmpl = template.Must(template.ParseFS(tmplFS, "tmpl/_results.html"))
+	resultsPartialTmpl = template.Must(template.New("_results.html").Funcs(funcMap).ParseFS(tmplFS, "tmpl/_results.html"))
 }
 
-func NewServer(idx *column.Index, port string) *Server {
-	srv := &Server{Index: idx}
+func NewServer(idx *column.Index, emailDir string, port string) *Server {
+	srv := &Server{Index: idx, EmailsRoot: emailDir}
 	srv.hs = &http.Server{
 		Addr:    net.JoinHostPort("0.0.0.0", port),
 		Handler: srv.serveHandler(),
@@ -56,6 +66,7 @@ func (s *Server) serveHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /static/", http.FileServerFS(staticFS))
 	mux.Handle("GET /search", s.serveSearch())
+	mux.Handle("GET /email/{email}", s.retrieveEmail())
 	mux.Handle("GET /", s.serveRoot())
 
 	return mux
@@ -99,6 +110,40 @@ func (s *Server) serveSearch() http.HandlerFunc {
 		if err := resultsPartialTmpl.Execute(w, data); err != nil {
 			log.Printf("Error! %s\n", err)
 		}
+	}
+}
+
+func (s *Server) retrieveEmail() http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		escEmail := req.PathValue("email")
+		if len(escEmail) == 0 || len(s.EmailsRoot) == 0 {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		email, err := url.PathUnescape(escEmail)
+		if err != nil {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		emailpath := filepath.Join(s.EmailsRoot, email)
+		f, err := os.Open(emailpath)
+		if err != nil {
+			log.Printf("Error opening email %q - %s\n", emailpath, err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		emailbody, err := io.ReadAll(f)
+		if err != nil {
+			log.Printf("Error reading email %q - %s\n", emailpath, err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write(emailbody)
+
+		defer f.Close()
 	}
 }
 
