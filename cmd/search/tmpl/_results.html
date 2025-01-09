@@ -1,3 +1,15 @@
 <div>
-    Nothing to see here yet!
+    The query <strong>{{.Query}}</strong> had {{len .Results}} results.
+
+    {{if gt (len .Results) 10}}
+        <em>Only printing the first 10 results</em>
+
+        {{range (slice .Results 0 10)}}
+            <li>{{.Filename}}</li>
+        {{end}}
+    {{else}}
+        {{range .Results}}
+            <li>{{.Filename}}</li>
+        {{end}}
+    {{end}}
 </div>

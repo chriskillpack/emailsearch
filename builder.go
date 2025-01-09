@@ -39,6 +39,18 @@ type IndexBuilder struct {
 	initOnce sync.Once
 }
 
+// fileIndex tracks the positions of words in a specific file
+type fileIndex map[string][]int
+
+type match struct {
+	FilenameStringIndex int
+	Offsets             []int
+}
+
+// wordIndex is the global index for all the files in the corpus
+// As such it tracks more information than LocalIndex does.
+type wordIndex map[string][]match
+
 // Holds the output of one of the injestion workers
 type injestedFile struct {
 	Filename string

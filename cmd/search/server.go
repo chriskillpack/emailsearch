@@ -3,10 +3,10 @@ package main
 import (
 	"context"
 	"embed"
+	"html/template"
 	"net"
 	"net/http"
 	"strings"
-	"text/template"
 
 	"github.com/chriskillpack/column"
 )
@@ -67,14 +67,29 @@ func (s *Server) serveSearch() http.HandlerFunc {
 		}
 
 		qvals := req.URL.Query()
-		if query, ok := qvals["query"]; ok {
-			queryparts := strings.Split(query[0], " ")
-			s.Index.FindWord(queryparts[0])
+		query, ok := qvals["query"]
+		if !ok {
+			w.Header().Set("Cache-Control", "no-store, no-cache")
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		queryparts := strings.Split(query[0], " ")
+		queryresults, err := s.Index.QueryIndex(queryparts)
+		if err != nil {
+			w.Header().Set("Cache-Control", "no-store, no-cache")
+			w.WriteHeader(http.StatusInternalServerError)
+			return
 		}
 
 		w.Header().Set("Cache-Control", "no-store, no-cache")
 		w.WriteHeader(http.StatusOK)
-		resultsPartialTmpl.Execute(w, nil)
+
+		data := struct {
+			Query   string
+			Results []column.QueryResults
+		}{query[0], queryresults}
+		resultsPartialTmpl.Execute(w, data)
 	}
 }
 

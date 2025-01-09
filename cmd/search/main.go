@@ -27,7 +27,7 @@ func main() {
 	}
 
 	if *flagQuery != "" {
-		idx.FindWord(*flagQuery)
+		idx.QueryIndex([]string{*flagQuery})
 		idx.Finish()
 		os.Exit(0)
 	}
