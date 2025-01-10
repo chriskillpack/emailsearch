@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -28,7 +29,13 @@ func main() {
 	}
 
 	if *flagQuery != "" {
-		idx.QueryIndex([]string{*flagQuery})
+		results, err := idx.QueryIndex([]string{*flagQuery})
+		if err != nil {
+			log.Fatal(err)
+		}
+		// TODO: prettier printing of results
+		fmt.Printf("%+v\n", results)
+
 		idx.Finish()
 		os.Exit(0)
 	}

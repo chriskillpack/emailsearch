@@ -37,11 +37,18 @@
 
                 <!-- Results Container -->
                 <div id="resultsContainer" class="w-full min-h-[500px] border-t border-gray-200">
-                    <!-- Results will be inserted here by JavaScript -->
                 </div>
             </div>
         </div>
 
         <script src="static/page.js"></script>
+
+        <!-- I hate this code below, it's ugly but it gets the job done for now. -->
+        {{- if gt (len .Query) 0}}
+        <script>
+            searchInput.value = {{.Query}}
+            runQuery({{.Query}})
+        </script>
+        {{end}}
     </body>
 </html>

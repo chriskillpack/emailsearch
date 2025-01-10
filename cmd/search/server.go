@@ -149,6 +149,12 @@ func (s *Server) retrieveEmail() http.HandlerFunc {
 
 func (s *Server) serveRoot() http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
-		indexTmpl.Execute(w, nil)
+		escQuery := req.URL.Query().Get("q")
+		query, _ := url.QueryUnescape(escQuery)
+
+		data := struct {
+			Query string
+		}{query}
+		indexTmpl.Execute(w, data)
 	}
 }
