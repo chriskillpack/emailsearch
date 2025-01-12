@@ -35,6 +35,7 @@ type IndexBuilder struct {
 	filenames *StringSet
 	words     *StringSet
 	wordIndex wordIndex
+	nDocs     int // Number of documents successfully processed and merged into index
 
 	initOnce sync.Once
 }
@@ -152,6 +153,7 @@ func (ib *IndexBuilder) InjestFiles(filenames []string, maxSize int64) error {
 		if result.Err == nil {
 			// Merge the file index into the main index
 			ib.MergeInFileIndex(result.Index, result.Filename)
+			ib.nDocs++
 		} else {
 			fmt.Printf("Encountered error processing %s\n", result.Filename)
 		}
@@ -224,9 +226,18 @@ func (ib *IndexBuilder) Serialize(dir string) error {
 	}
 	fmt.Println("Serialized word stringset")
 
-	f, err := os.Create(filepath.Join(dir, CorpusIndex))
-	if err != nil {
+	if err := ib.writeIndexAndOffsets(filepath.Join(dir, CorpusIndex), filepath.Join(dir, IndexWordOffsets)); err != nil {
 		return fmt.Errorf("failed to serialize: %w", err)
+	}
+	fmt.Println("Serialized index")
+
+	return nil
+}
+
+func (ib *IndexBuilder) writeIndexAndOffsets(indexFname, offsetsFname string) error {
+	f, err := os.Create(indexFname)
+	if err != nil {
+		return err
 	}
 	defer f.Close()
 
@@ -234,45 +245,47 @@ func (ib *IndexBuilder) Serialize(dir string) error {
 
 	out := &bytes.Buffer{}
 
-	bc := serializedIndexHeader{Version: 1, NumEntries: uint64(len(ib.wordIndex))}
+	bc := serializedIndexHeader{
+		Version:    1,
+		NumEntries: uint64(len(ib.wordIndex)),
+		CorpusSize: uint32(ib.nDocs),
+	}
 	binary.Write(out, binary.BigEndian, bc)
 	out.WriteTo(f)
 
 	sortedWords := slices.Sorted(maps.Keys(ib.wordIndex))
 
-	bm := serializedMatch{}
+	scratch := make([]byte, binary.MaxVarintLen64*2)
 	for _, word := range sortedWords {
 		matches := ib.wordIndex[word]
-
-		out.Reset()
 
 		widx, _ := ib.words.Index(word)
 		wordCorpusOffsets[widx].WordIndex = int32(widx)
 		foff, _ := f.Seek(0, io.SeekCurrent) // TODO - replace with something else
 		wordCorpusOffsets[widx].Offset = foff
 
-		binary.Write(out, binary.BigEndian, uint32(len(matches)))
+		n := binary.PutUvarint(scratch, uint64(len(matches)))
+		out.Write(scratch[:n])
 
 		for i := range matches {
-			bm.FilenameIndex = uint32(matches[i].FilenameStringIndex)
-			bm.NumOffsets = uint32(len(matches[i].Offsets))
-			binary.Write(out, binary.BigEndian, bm)
+			// FilenameIndex
+			n = binary.PutUvarint(scratch, uint64(matches[i].FilenameStringIndex))
+			// NumOffsets
+			n += binary.PutUvarint(scratch[n:], uint64(len(matches[i].Offsets)))
+			out.Write(scratch[:n])
 
-			// TODO - use varints for these offsets
-			offsets := make([]uint32, len(matches[i].Offsets))
-			for j, off := range matches[i].Offsets {
-				offsets[j] = uint32(off)
+			for _, off := range matches[i].Offsets {
+				n = binary.PutUvarint(scratch, uint64(off))
+				out.Write(scratch[:n])
 			}
-			binary.Write(out, binary.BigEndian, offsets)
 		}
 
 		out.WriteTo(f)
 	}
 	f.Close()
-	fmt.Println("Serialized index")
 
-	if err = writeIndexOffsetsFile(wordCorpusOffsets, filepath.Join(dir, IndexWordOffsets)); err != nil {
-		return fmt.Errorf("failed to serialize: %w", err)
+	if err := writeIndexOffsetsFile(wordCorpusOffsets, offsetsFname); err != nil {
+		return err
 	}
 	fmt.Println("Serialized word offsets")
 

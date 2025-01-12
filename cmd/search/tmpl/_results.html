@@ -5,7 +5,7 @@
         <em>Only printing the first {{len .Results}} results.</em>
     {{end}}
     <br>
-    Query took {{.ResponseTime}}.
+    Query took {{.ResponseTime}} to search {{.NDocuments}} documents.
     <br>
     {{- range .Results}}
         <div class="p-4 bg-white rounded-lg border border-gray-200 hover:border-gray-300 hover:shadow-sm transition-all">

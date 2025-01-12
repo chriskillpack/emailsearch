@@ -4,12 +4,13 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 
-	"golang.org/x/exp/mmap"
+	"github.com/go-mmap/mmap"
 )
 
 // Index file format structures
@@ -21,7 +22,9 @@ type serializedMatch struct {
 
 type serializedIndexHeader struct {
 	Version    uint32
-	NumEntries uint64
+	NumEntries uint64 // Number of words in the index
+	CorpusSize uint32 // Number of documents the index was built from
+
 	// Followed by NumEntries of serializedWord
 	//Entry      []serializedWord
 }
@@ -41,7 +44,9 @@ type Index struct {
 	words     []string
 	offsets   []serializedWordIndexOffset
 
-	indexRdr *mmap.ReaderAt
+	CorpusSize int
+
+	indexRdr *mmap.File
 }
 
 func LoadIndexFromDisk(indexdir string) (*Index, error) {
@@ -73,6 +78,10 @@ func LoadIndexFromDisk(indexdir string) (*Index, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Read in the header
+	var header serializedIndexHeader
+	binary.Read(idx.indexRdr, binary.BigEndian, &header)
+	idx.CorpusSize = int(header.CorpusSize)
 
 	return idx, nil
 }
@@ -98,7 +107,6 @@ type QueryResults struct {
 func (idx *Index) QueryIndex(querywords []string) ([]QueryResults, error) {
 	resultsmap := make(map[string][]QueryWordMatch)
 
-	scratch := make([]byte, 1000)
 	for _, query := range querywords {
 		// Lookup the word in the word strings table
 		wordIdx := -1
@@ -128,34 +136,30 @@ func (idx *Index) QueryIndex(querywords []string) ([]QueryResults, error) {
 			return nil, nil
 		}
 
-		n, err := idx.indexRdr.ReadAt(scratch[0:4], int64(offset))
-		if n != 4 || err != nil {
-			return nil, err
+		if _, err := idx.indexRdr.Seek(offset, io.SeekStart); err != nil {
+			return nil, fmt.Errorf("seek into index failed - %w", err)
 		}
-		numMatches := binary.BigEndian.Uint32(scratch)
-		offset += 4
+
+		numMatches, err := binary.ReadUvarint(idx.indexRdr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read index - %w", err)
+		}
 
 		// Read out the matches in files
 		for _ = range numMatches {
-			if n, err := idx.indexRdr.ReadAt(scratch[0:8], offset); n != 8 || err != nil {
-				return nil, fmt.Errorf("Error reading from index: %w", err)
-			}
-			offset += 8
+			fidx, _ := binary.ReadUvarint(idx.indexRdr)
+			numoff, _ := binary.ReadUvarint(idx.indexRdr)
 
-			var sm serializedMatch
-			sm.FilenameIndex = binary.BigEndian.Uint32(scratch[0:4])
-			sm.NumOffsets = binary.BigEndian.Uint32(scratch[4:8])
-
-			filename := idx.filenames[sm.FilenameIndex]
+			filename := idx.filenames[fidx]
 
 			// Read out the offsets for each file
-			matchOffsets := make([]uint32, sm.NumOffsets)
-			for j := range sm.NumOffsets {
-				if _, err := idx.indexRdr.ReadAt(scratch[0:4], offset); err != nil {
+			matchOffsets := make([]uint32, numoff)
+			for j := range numoff {
+				off, err := binary.ReadUvarint(idx.indexRdr)
+				if err != nil {
 					return nil, fmt.Errorf("Error reading from index: %w", err)
 				}
-				offset += 4
-				matchOffsets[j] = binary.BigEndian.Uint32(scratch[0:4])
+				matchOffsets[j] = uint32(off)
 
 				resultsmap[filename] = append(resultsmap[filename], QueryWordMatch{query, int(matchOffsets[j])})
 			}

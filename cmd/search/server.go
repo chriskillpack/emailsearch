@@ -106,7 +106,8 @@ func (s *Server) serveSearch() http.HandlerFunc {
 			NumResults   int
 			ResponseTime string
 			Results      []column.QueryResults
-		}{query[0], len(queryresults), duration.String(), queryresults[:min(len(queryresults), 10)]}
+			NDocuments   int
+		}{query[0], len(queryresults), duration.String(), queryresults[:min(len(queryresults), 10)], s.Index.CorpusSize}
 		if err := resultsPartialTmpl.Execute(w, data); err != nil {
 			log.Printf("Error! %s\n", err)
 		}
