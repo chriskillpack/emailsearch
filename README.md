@@ -49,11 +49,13 @@ The corpus file can be memory mapped and accessed to read out the match informat
 
 # Searching
 
-On device disk we would store all the original emails plus the preprocessed files:
+On disk we store the generated files:
 ```
+dir/
   corpus.index - The generated search index
+  corpus.cat - Compressed catalog of the indexed corpus content
   filenames.sid - The string table of email filenames
-  words.sid - The string table of words in the corpus.
+  words.sid - The string table of words in the corpus
   word.offsets - The offsets of each word into corpus.index
 ```
 

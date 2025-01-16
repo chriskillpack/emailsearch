@@ -84,6 +84,8 @@ func (ss *StringSet) Serialize(outpath string) error {
 		// Write out length as a varint
 		n := binary.PutUvarint(scratch[:], uint64(len(str)))
 		out.Write(scratch[0:n])
+		// The WriteString only writes out the contents of the string, there is
+		// no preceding fields or trailing zero byte.
 		out.WriteString(str)
 	}
 

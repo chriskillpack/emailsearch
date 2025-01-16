@@ -35,8 +35,8 @@ type serializedWordOffsetHeader struct {
 }
 
 type serializedWordIndexOffset struct {
-	WordIndex int32 // Index into the word string table
-	Offset    int64 // Binary offset into the index file
+	WordIndex uint32 // Index into the word string table
+	Offset    int64  // Binary offset into the index file
 }
 
 type Index struct {
@@ -46,7 +46,8 @@ type Index struct {
 
 	CorpusSize int
 
-	indexRdr *mmap.File
+	indexRdr   *mmap.File
+	catalogRdr *mmap.File
 }
 
 func LoadIndexFromDisk(indexdir string) (*Index, error) {
@@ -74,14 +75,19 @@ func LoadIndexFromDisk(indexdir string) (*Index, error) {
 	}
 
 	// Memory map the index in
-	idx.indexRdr, err = mmap.Open(filepath.Join(indexdir, CorpusIndex))
-	if err != nil {
+	if idx.indexRdr, err = mmap.Open(filepath.Join(indexdir, CorpusIndex)); err != nil {
 		return nil, err
 	}
-	// Read in the header
+	// Read in the index header
 	var header serializedIndexHeader
 	binary.Read(idx.indexRdr, binary.BigEndian, &header)
 	idx.CorpusSize = int(header.CorpusSize)
+
+	// Memory map the catalog in
+	if idx.catalogRdr, err = mmap.Open(filepath.Join(indexdir, CorpusCatalog)); err != nil {
+		return nil, err
+	}
+	// TODO - Complete reading in the catalog header
 
 	return idx, nil
 }
@@ -89,6 +95,9 @@ func LoadIndexFromDisk(indexdir string) (*Index, error) {
 func (idx *Index) Finish() {
 	if idx.indexRdr != nil {
 		idx.indexRdr.Close()
+	}
+	if idx.catalogRdr != nil {
+		idx.catalogRdr.Close()
 	}
 }
 
@@ -146,7 +155,7 @@ func (idx *Index) QueryIndex(querywords []string) ([]QueryResults, error) {
 		}
 
 		// Read out the matches in files
-		for _ = range numMatches {
+		for range numMatches {
 			fidx, _ := binary.ReadUvarint(idx.indexRdr)
 			numoff, _ := binary.ReadUvarint(idx.indexRdr)
 
@@ -157,7 +166,7 @@ func (idx *Index) QueryIndex(querywords []string) ([]QueryResults, error) {
 			for j := range numoff {
 				off, err := binary.ReadUvarint(idx.indexRdr)
 				if err != nil {
-					return nil, fmt.Errorf("Error reading from index: %w", err)
+					return nil, fmt.Errorf("error reading from index: %w", err)
 				}
 				matchOffsets[j] = uint32(off)
 

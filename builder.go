@@ -2,6 +2,7 @@ package column
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -20,6 +21,7 @@ const (
 	WordsStringTable     = "words.sid"
 	CorpusIndex          = "corpus.index"
 	IndexWordOffsets     = "word.offsets"
+	CorpusCatalog        = "corpus.cat"
 )
 
 // RE to split on spaces and include ' in the word
@@ -35,6 +37,7 @@ type IndexBuilder struct {
 	filenames *StringSet
 	words     *StringSet
 	wordIndex wordIndex
+	injested  []injestedFile
 	nDocs     int // Number of documents successfully processed and merged into index
 
 	initOnce sync.Once
@@ -54,9 +57,11 @@ type wordIndex map[string][]match
 
 // Holds the output of one of the injestion workers
 type injestedFile struct {
-	Filename string
-	Index    fileIndex
-	Err      error
+	Filename   string
+	Index      fileIndex
+	Len        int    // length of the indexed content in the file
+	Compressed []byte // gzip compressed copy of filedata that was injested
+	Err        error  // error during processing
 }
 
 func (i *IndexBuilder) Init() {
@@ -74,6 +79,11 @@ func (ib *IndexBuilder) verbose(format string, a ...any) {
 }
 
 func (ib *IndexBuilder) InjestFiles(filenames []string, maxSize int64) error {
+	// 32-bit overflow check
+	if int(uint32(len(filenames))) != len(filenames) {
+		panic("number of files exceeds file format limits")
+	}
+
 	inCh := make(chan string, ib.NThreads)
 	outCh := make(chan injestedFile)
 
@@ -81,7 +91,7 @@ func (ib *IndexBuilder) InjestFiles(filenames []string, maxSize int64) error {
 	wg.Add(ib.NThreads)
 
 	// Spin up the worker "threads" (goroutines)
-	for _ = range ib.NThreads {
+	for range ib.NThreads {
 		// Each worker gets it's own scratch buffer to load file data into. This
 		// is an attempt to reduce churn in the GC. The scratch buffer is sized
 		// to the maximum file size to avoid reallocating the buffer.
@@ -94,25 +104,28 @@ func (ib *IndexBuilder) InjestFiles(filenames []string, maxSize int64) error {
 			// builds a LocalIndex of the email body and then sends result
 			// through the output channel.
 			for work := range inCh {
-				filep := filepath.Join(ib.InputPath, work)
-
 				outData := injestedFile{Filename: work}
-				var n int
-				f, err := os.Open(filep)
+
+				f, err := os.Open(filepath.Join(ib.InputPath, work))
 				if err != nil {
 					outData.Err = err
-					goto respond
+					outCh <- outData
+					continue
 				}
 
-				n, err = f.Read(scratch)
+				if m, err := mail.ReadMessage(f); err == nil {
+					compbody := &bytes.Buffer{}
+					gzw := gzip.NewWriter(compbody)
+					n, err := readAllInto(scratch, io.TeeReader(m.Body, gzw))
+					if err == nil {
+						outData.Index = ib.computeFileIndex(scratch[:n])
+						gzw.Close()
+						outData.Compressed = compbody.Bytes()
+						outData.Len = int(n)
+					}
+				}
 				f.Close()
-				if err != nil {
-					outData.Err = err
-					goto respond
-				}
-
-				outData.Index, outData.Err = ib.computeFileIndex(scratch[0:n])
-			respond:
+				outData.Err = err
 				outCh <- outData
 			}
 		}(scratch)
@@ -140,45 +153,35 @@ func (ib *IndexBuilder) InjestFiles(filenames []string, maxSize int64) error {
 
 	// Retrieve the injested results and sort for a deterministic building of
 	// the main index.
-	injested := make([]injestedFile, 0, len(filenames))
+	ib.injested = make([]injestedFile, 0, len(filenames))
 	for result := range outCh {
-		injested = append(injested, result)
+		ib.injested = append(ib.injested, result)
 	}
-	slices.SortFunc(injested, func(a, b injestedFile) int {
+	slices.SortFunc(ib.injested, func(a, b injestedFile) int {
 		return strings.Compare(a.Filename, b.Filename)
 	})
 
 	// This is all single threaded for now
-	for _, result := range injested {
-		if result.Err == nil {
-			// Merge the file index into the main index
-			ib.MergeInFileIndex(result.Index, result.Filename)
-			ib.nDocs++
-		} else {
+	for _, result := range ib.injested {
+		if result.Err != nil {
 			fmt.Printf("Encountered error processing %s\n", result.Filename)
+			continue
 		}
+
+		// Merge the file index into the main index
+		ib.MergeInFileIndex(result.Index, result.Filename)
+		ib.nDocs++
 	}
 
 	return nil
 }
 
-func (idx *IndexBuilder) computeFileIndex(filedata []byte) (fileIndex, error) {
-	rdr := bytes.NewReader(filedata)
-	m, err := mail.ReadMessage(rdr)
-	if err != nil {
-		return nil, err
-	}
-
-	body, err := io.ReadAll(m.Body)
-	if err != nil {
-		return nil, err
-	}
-
+func (idx *IndexBuilder) computeFileIndex(content []byte) fileIndex {
 	// Find all the words in the email body
 	// It doesn't handle lines that end with =XX where XX is a number
 	index := make(fileIndex)
-	for _, word := range emailWordsRe.FindAllIndex(body, -1) {
-		txt := string(body[word[0]:word[1]])
+	for _, word := range emailWordsRe.FindAllIndex(content, -1) {
+		txt := string(content[word[0]:word[1]])
 
 		if _, ok := index[txt]; !ok {
 			index[txt] = []int{word[0]}
@@ -187,7 +190,7 @@ func (idx *IndexBuilder) computeFileIndex(filedata []byte) (fileIndex, error) {
 		}
 	}
 
-	return index, nil
+	return index
 }
 
 func (c *IndexBuilder) MergeInFileIndex(fileIndex fileIndex, filename string) {
@@ -226,10 +229,17 @@ func (ib *IndexBuilder) Serialize(dir string) error {
 	}
 	fmt.Println("Serialized word stringset")
 
+	// Index and offsets file
 	if err := ib.writeIndexAndOffsets(filepath.Join(dir, CorpusIndex), filepath.Join(dir, IndexWordOffsets)); err != nil {
 		return fmt.Errorf("failed to serialize: %w", err)
 	}
 	fmt.Println("Serialized index")
+
+	// Compressed corpus catalog
+	if err := ib.writeCatalog(filepath.Join(dir, CorpusCatalog)); err != nil {
+		return fmt.Errorf("failed to serialize: %w", err)
+	}
+	fmt.Println("Serialized catalog")
 
 	return nil
 }
@@ -248,7 +258,7 @@ func (ib *IndexBuilder) writeIndexAndOffsets(indexFname, offsetsFname string) er
 	bc := serializedIndexHeader{
 		Version:    1,
 		NumEntries: uint64(len(ib.wordIndex)),
-		CorpusSize: uint32(ib.nDocs),
+		CorpusSize: uint32(ib.nDocs), // guaranteed value won't overflow uint32
 	}
 	binary.Write(out, binary.BigEndian, bc)
 	out.WriteTo(f)
@@ -260,23 +270,32 @@ func (ib *IndexBuilder) writeIndexAndOffsets(indexFname, offsetsFname string) er
 		matches := ib.wordIndex[word]
 
 		widx, _ := ib.words.Index(word)
-		wordCorpusOffsets[widx].WordIndex = int32(widx)
-		foff, _ := f.Seek(0, io.SeekCurrent) // TODO - replace with something else
+		wordCorpusOffsets[widx].WordIndex = uint32(widx)
+		foff, err := f.Seek(0, io.SeekCurrent) // TODO - replace with something else
+		if err != nil {
+			return err
+		}
 		wordCorpusOffsets[widx].Offset = foff
 
 		n := binary.PutUvarint(scratch, uint64(len(matches)))
-		out.Write(scratch[:n])
+		if _, err := out.Write(scratch[:n]); err != nil {
+			return err
+		}
 
 		for i := range matches {
 			// FilenameIndex
 			n = binary.PutUvarint(scratch, uint64(matches[i].FilenameStringIndex))
 			// NumOffsets
 			n += binary.PutUvarint(scratch[n:], uint64(len(matches[i].Offsets)))
-			out.Write(scratch[:n])
+			if _, err := out.Write(scratch[:n]); err != nil {
+				return err
+			}
 
 			for _, off := range matches[i].Offsets {
 				n = binary.PutUvarint(scratch, uint64(off))
-				out.Write(scratch[:n])
+				if _, err := out.Write(scratch[:n]); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -292,7 +311,72 @@ func (ib *IndexBuilder) writeIndexAndOffsets(indexFname, offsetsFname string) er
 	return nil
 }
 
+func (ib *IndexBuilder) writeCatalog(filename string) error {
+	f, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	// File format of the catalog
+	// 0x00: u32 Number of catalog entries (N) in offset table
+	// 0x04: u32 File offset to compressed content of file index 0
+	// 0x08: u32 Length of uncompressed content of file index 0
+	// 0x0C: u32 File offset to compressed content of file index 1
+	// 0x10: u32 Length of uncompressed content of file index 1
+	// ....:
+	// ....: u32 File offset to compressed content of file index N-1
+	// ....: u32 Length of uncompressed content of file index N-1
+	// ....: Compressed content of file index 0
+	// ....:
+	// ....: Compressed content of file index N-1
+	// EOF
+	// If an offset and length are 0 it means that there is no stored content
+	// for the corresponding file. This can happen because there was an error
+	// indexing the files content.
+	binary.Write(f, binary.BigEndian, uint32(len(ib.injested)))
+	offsets := make([]uint32, len(ib.injested)*2)
+	binary.Write(f, binary.BigEndian, offsets) // write out as a placeholder
+	blah, _ := f.Seek(0, io.SeekCurrent)
+	foffset := uint32(blah)
+
+	for _, injested := range ib.injested {
+		if injested.Err != nil {
+			continue
+		}
+
+		if int(uint32(injested.Len)) != injested.Len {
+			panic("content length overflow")
+		}
+
+		fidx, _ := ib.filenames.Index(injested.Filename)
+		offsets[fidx*2+0] = foffset
+		offsets[fidx*2+1] = uint32(injested.Len)
+
+		if _, err := f.Write(injested.Compressed); err != nil {
+			return err
+		}
+
+		// Overflow check on the offset
+		if foffset+uint32(len(injested.Compressed)) < foffset {
+			panic("offset overflow")
+		}
+		foffset += uint32(len(injested.Compressed))
+	}
+
+	// Go back and write out the completed offsets table
+	if _, err = f.Seek(4, io.SeekStart); err != nil {
+		return err
+	}
+
+	return binary.Write(f, binary.BigEndian, offsets)
+}
+
 func writeIndexOffsetsFile(wordCorpusOffsets []serializedWordIndexOffset, filename string) error {
+	if int(uint32(len(wordCorpusOffsets))) != len(wordCorpusOffsets) {
+		panic("number of documents exceeds file format limits")
+	}
+
 	buf := &bytes.Buffer{}
 
 	hdr := serializedWordOffsetHeader{
@@ -314,6 +398,24 @@ func writeIndexOffsetsFile(wordCorpusOffsets []serializedWordIndexOffset, filena
 	f.Close()
 
 	return err
+}
+
+// Reads everything from the Reader r into data starting from the front. It
+// assumes that data is big enough. Returns the number of bytes read and the
+// error. If an EOF is encountered the function assumes success and returns
+// a nil error in that case.
+func readAllInto(data []byte, r io.Reader) (int, error) {
+	off := 0
+	for {
+		n, err := r.Read(data[off:cap(data)])
+		off += n
+		if err != nil {
+			if err == io.EOF {
+				err = nil
+			}
+			return off, err
+		}
+	}
 }
 
 func createOutDir(dir string) error {
