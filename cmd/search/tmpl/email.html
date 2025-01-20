@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document Viewer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        p {
+            font-family: monospace;
+            margin: 1em 0px;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body class="min-h-screen bg-gray-50">
+    <div class="mb-8">
+        <h1 id="documentTitle" class="text-4xl font-bold text-gray-900 mb-2">{{ .Filename }}</h1>
+        <div class="bg-blue-50 border border-blue-100 rounded-lg p-4 flex items-center justify-between">
+            <div class="flex items-center">
+                <span class="text-blue-800">Showing matches for "<span class="font-medium">some search term</span>"
+            </div>
+        </div>
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200">
+            <div class="p-8 prose max-w-none">
+                <p>{{ .Contents }}</p>
+            </div>
+        </div>
+    </div>
+    <script>
+        const cls = ["bg-yellow-200", "px-1", "rounded"]
+        marks = document.getElementsByTagName("mark")
+        Array.from(marks).forEach(element => {
+            element.classList.add(...cls)
+        });
+    </script>
+</body>
+</html>

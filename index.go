@@ -2,6 +2,7 @@ package column
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -39,12 +40,17 @@ type serializedWordIndexOffset struct {
 	Offset    int64  // Binary offset into the index file
 }
 
-type Index struct {
-	filenames []string
-	words     []string
-	offsets   []serializedWordIndexOffset
+type catalogContentsOffset struct {
+	Offset uint32 // Offset of the compressed content in the catalog
+	Length uint32 // Length of the uncompressed content
+}
 
-	CorpusSize int
+type Index struct {
+	filenames      []string
+	words          []string
+	offsets        []serializedWordIndexOffset
+	contentOffsets []catalogContentsOffset
+	CorpusSize     int
 
 	indexRdr   *mmap.File
 	catalogRdr *mmap.File
@@ -87,7 +93,10 @@ func LoadIndexFromDisk(indexdir string) (*Index, error) {
 	if idx.catalogRdr, err = mmap.Open(filepath.Join(indexdir, CorpusCatalog)); err != nil {
 		return nil, err
 	}
-	// TODO - Complete reading in the catalog header
+	// Read in the catalog header
+	if err := idx.loadCatalog(idx.catalogRdr); err != nil {
+		return nil, err
+	}
 
 	return idx, nil
 }
@@ -109,12 +118,14 @@ type QueryWordMatch struct {
 type QueryResults struct {
 	Filename    string
 	WordMatches []QueryWordMatch
+
+	FilenameIndex int
 }
 
 // instead of grouping find results by file, should we group by word?
 // how do we prefer if file A has all 3 query words, vs B which has 2?
 func (idx *Index) QueryIndex(querywords []string) ([]QueryResults, error) {
-	resultsmap := make(map[string][]QueryWordMatch)
+	resultsmap := make(map[int][]QueryWordMatch)
 
 	for _, query := range querywords {
 		// Lookup the word in the word strings table
@@ -159,8 +170,6 @@ func (idx *Index) QueryIndex(querywords []string) ([]QueryResults, error) {
 			fidx, _ := binary.ReadUvarint(idx.indexRdr)
 			numoff, _ := binary.ReadUvarint(idx.indexRdr)
 
-			filename := idx.filenames[fidx]
-
 			// Read out the offsets for each file
 			matchOffsets := make([]uint32, numoff)
 			for j := range numoff {
@@ -170,7 +179,7 @@ func (idx *Index) QueryIndex(querywords []string) ([]QueryResults, error) {
 				}
 				matchOffsets[j] = uint32(off)
 
-				resultsmap[filename] = append(resultsmap[filename], QueryWordMatch{query, int(matchOffsets[j])})
+				resultsmap[int(fidx)] = append(resultsmap[int(fidx)], QueryWordMatch{query, int(matchOffsets[j])})
 			}
 		}
 	}
@@ -193,8 +202,8 @@ func (idx *Index) QueryIndex(querywords []string) ([]QueryResults, error) {
 	// lexicographically. TODO - a better scoring criteria would consider how many
 	// of the query words are in each file and secondly how close together they are
 	results := make([]QueryResults, 0, len(resultsmap))
-	for filename, wordmatches := range resultsmap {
-		results = append(results, QueryResults{filename, wordmatches})
+	for fidx, wordmatches := range resultsmap {
+		results = append(results, QueryResults{idx.filenames[fidx], wordmatches, fidx})
 	}
 	slices.SortFunc(results, func(a, b QueryResults) int {
 		la := len(a.WordMatches)
@@ -211,6 +220,32 @@ func (idx *Index) QueryIndex(querywords []string) ([]QueryResults, error) {
 	})
 
 	return results, nil
+}
+
+func (idx *Index) CatalogContent(filenameIdx int) (content []byte, filename string, ok bool) {
+	if filenameIdx < 0 || filenameIdx >= len(idx.filenames) {
+		return
+	}
+
+	entry := &idx.contentOffsets[filenameIdx]
+	if _, err := idx.catalogRdr.Seek(int64(entry.Offset), io.SeekStart); err != nil {
+		return
+	}
+
+	contents := make([]byte, entry.Length)
+	var (
+		gzr *gzip.Reader
+		err error
+	)
+	if gzr, err = gzip.NewReader(idx.catalogRdr); err != nil {
+		return
+	}
+
+	if _, err = io.ReadFull(gzr, contents); err != nil {
+		return
+	}
+
+	return contents, idx.filenames[filenameIdx], true
 }
 
 func loadStringTable(filename string) ([]string, error) {
@@ -264,4 +299,17 @@ func loadOffsetsTable(filename string) ([]serializedWordIndexOffset, error) {
 	}
 
 	return offsets, nil
+}
+
+func (idx *Index) loadCatalog(r io.Reader) error {
+	var ni uint32
+	if err := binary.Read(r, binary.BigEndian, &ni); err != nil {
+		return err
+	}
+
+	idx.contentOffsets = make([]catalogContentsOffset, ni)
+	if err := binary.Read(r, binary.BigEndian, idx.contentOffsets); err != nil {
+		return err
+	}
+	return nil
 }

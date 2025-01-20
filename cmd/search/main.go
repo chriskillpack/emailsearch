@@ -16,7 +16,6 @@ import (
 
 var (
 	flagIndexDir = flag.String("indexdir", "out/", "Directory that holds the search index")
-	flagEmailDir = flag.String("emaildir", "", "Directory to emails")
 	flagQuery    = flag.String("query", "", "query index, print results, quit")
 )
 
@@ -44,7 +43,7 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	srv := NewServer(idx, *flagEmailDir, "8080")
+	srv := NewServer(idx, "8080")
 
 	go func() {
 		if err := srv.Start(); err != nil && err != http.ErrServerClosed {
