@@ -60,7 +60,15 @@ func TestTrieSerialize(t *testing.T) {
 	trie.InsertWord("apple")
 	trie.InsertWord("ape")
 
-	trie2 := DeserializeTrie(trie.Serialize())
+	strie, err := trie.Serialize()
+	if err != nil {
+		t.Errorf("Error serializing trie - %s", err)
+	}
+	trie2, err := DeserializeTrie(strie)
+	if err != nil {
+		t.Errorf("Error deserializing trie - %s", err)
+	}
+
 	if want, got := true, trie2.Has("apple"); want != got {
 		t.Errorf("Expected to find \"apple\" but did not")
 	}
