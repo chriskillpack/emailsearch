@@ -57,16 +57,44 @@ func (t *Trie) InsertWord(w string) {
 }
 
 func (t *Trie) Has(w string) bool {
+	node := t.findNode(w)
+	return node != nil && node.IsWord
+}
+
+func (t *Trie) WithPrefix(prefix string) []string {
+	node := t.findNode(prefix)
+	if node == nil {
+		return []string{}
+	}
+
+	results := []string{}
+	t.collectWords(node, prefix, &results)
+	return results
+}
+
+func (t *Trie) findNode(w string) *TrieNode {
 	current := t.Root
 
 	for _, ch := range w {
 		if _, has := current.Children[ch]; !has {
-			return false
+			return nil
 		}
 		current = current.Children[ch]
 	}
 
-	return current.IsWord
+	return current
+}
+
+func (t *Trie) collectWords(node *TrieNode, prefix string, results *[]string) {
+	if node.IsWord {
+		// We found a word on the descent, add it now
+		*results = append(*results, prefix)
+	}
+
+	// Descend through all the children
+	for ch, child := range node.Children {
+		t.collectWords(child, prefix+string(ch), results)
+	}
 }
 
 // Important: Serialize() is not guaranteed to be generate the same binary

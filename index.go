@@ -50,6 +50,7 @@ type Index struct {
 	words          []string
 	offsets        []serializedWordIndexOffset
 	contentOffsets []catalogContentsOffset
+	prefixTree     *Trie
 	CorpusSize     int
 
 	indexRdr   *mmap.File
@@ -79,6 +80,12 @@ func LoadIndexFromDisk(indexdir string) (*Index, error) {
 	if len(idx.offsets) != len(idx.words) {
 		return nil, fmt.Errorf("data mismatch")
 	}
+
+	idx.prefixTree, err = loadPrefixTree(filepath.Join(indexdir, QueryPrefixTree))
+	if err != nil {
+		return nil, err
+	}
+	fmt.Println("Loaded prefix tree")
 
 	// Memory map the index in
 	if idx.indexRdr, err = mmap.Open(filepath.Join(indexdir, CorpusIndex)); err != nil {
@@ -312,4 +319,18 @@ func (idx *Index) loadCatalog(r io.Reader) error {
 		return err
 	}
 	return nil
+}
+
+func loadPrefixTree(filename string) (*Trie, error) {
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, err
+	}
+
+	trie, err := DeserializeTrie(data)
+	if err != nil {
+		return nil, err
+	}
+
+	return trie, err
 }

@@ -22,6 +22,7 @@ const (
 	CorpusIndex          = "corpus.index"
 	IndexWordOffsets     = "word.offsets"
 	CorpusCatalog        = "corpus.cat"
+	QueryPrefixTree      = "query.trie"
 )
 
 // RE to split on spaces and include ' in the word
@@ -241,6 +242,12 @@ func (ib *IndexBuilder) Serialize(dir string) error {
 	}
 	fmt.Println("Serialized catalog")
 
+	// Build and serialize the prefix tree
+	if err := ib.buildAndWritePrefixTree(filepath.Join(dir, QueryPrefixTree)); err != nil {
+		return fmt.Errorf("failed to serialize: %w", err)
+	}
+	fmt.Println("Serialized prefix tree")
+
 	return nil
 }
 
@@ -370,6 +377,22 @@ func (ib *IndexBuilder) writeCatalog(filename string) error {
 	}
 
 	return binary.Write(f, binary.BigEndian, offsets)
+}
+
+func (ib *IndexBuilder) buildAndWritePrefixTree(filename string) error {
+	trie := NewTrie()
+
+	words, _ := ib.words.Flatten()
+	for _, word := range words {
+		trie.InsertWord(word)
+	}
+
+	data, err := trie.Serialize()
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(filename, data, 0666)
 }
 
 func writeIndexOffsetsFile(wordCorpusOffsets []serializedWordIndexOffset, filename string) error {
