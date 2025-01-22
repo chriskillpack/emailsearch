@@ -6,6 +6,7 @@ import (
 	"embed"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"log"
@@ -73,6 +74,7 @@ func (s *Server) serveHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /static/", http.FileServerFS(staticFS))
 	mux.Handle("GET /search", s.serveSearch())
+	mux.Handle("GET /prefix", s.queryPrefix())
 	mux.Handle("GET /email/{email}", s.retrieveEmail())
 	mux.Handle("GET /", s.serveRoot())
 
@@ -94,7 +96,7 @@ func (s *Server) serveSearch() http.HandlerFunc {
 		w.Header().Set("Cache-Control", "no-store, no-cache")
 
 		qvals := req.URL.Query()
-		query, ok := qvals["query"]
+		query, ok := qvals["q"]
 		if !ok {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -179,6 +181,30 @@ func (s *Server) retrieveEmail() http.HandlerFunc {
 		if err := emailTmpl.Execute(w, data); err != nil {
 			log.Printf("Error rendering template %s\n", err)
 			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		}
+	}
+}
+
+func (s *Server) queryPrefix() http.HandlerFunc {
+	type queryResults struct {
+		Matches []string `json:"matches"`
+	}
+
+	return func(w http.ResponseWriter, req *http.Request) {
+		var res queryResults
+
+		qvals := req.URL.Query()
+		query, ok := qvals["q"]
+
+		enc := json.NewEncoder(w)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+		if ok && len(query) >= 1 && len(query[0]) >= 3 {
+			res.Matches = s.Index.Prefix(query[0])
+		}
+		if err := enc.Encode(&res); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
 		}
 	}
 }

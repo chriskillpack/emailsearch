@@ -255,6 +255,14 @@ func (idx *Index) CatalogContent(filenameIdx int) (content []byte, filename stri
 	return contents, idx.filenames[filenameIdx], true
 }
 
+func (idx *Index) Prefix(prefix string) []string {
+	if idx.prefixTree == nil {
+		return nil
+	}
+
+	return idx.prefixTree.WithPrefix(prefix)
+}
+
 func loadStringTable(filename string) ([]string, error) {
 	data, err := os.ReadFile(filename)
 	if err != nil {
