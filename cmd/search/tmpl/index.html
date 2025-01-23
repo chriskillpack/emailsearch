@@ -16,7 +16,7 @@
                 </h1>
             </div>
             <!-- Search Container -->
-            <div class="w-full">
+            <div class="w-full relative">
                 <!-- Search Input -->
                 <div class="relative mb-8">
                     <div class="relative flex items-center w-full">
@@ -41,6 +41,10 @@
                     </div>
                 </div>
 
+                <!-- Suggestions dropdown -->
+                <div id="suggestionsDropdown" class="absolute z-10 w-full bg-white border border-gray-300 rounded-b-lg shadow-lg hidden">
+                    <ul id="suggestionsList" class="py-1"></ul>
+                </div>
                 <!-- Results Container -->
                 <div id="resultsContainer" class="w-full min-h-[500px] border-t border-gray-200">
                 </div>

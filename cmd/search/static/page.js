@@ -39,6 +39,8 @@ class RequestManager {
 const searchInput = document.getElementById('searchInput');
 const resultsContainer = document.getElementById('resultsContainer');
 const requestManager = new RequestManager();
+const suggestionsDropDown = document.getElementById('suggestionsDropdown');
+const suggestionsList = document.getElementById('suggestionsList');
 
 searchInput.addEventListener("input", async (event) => {
     try {
@@ -55,8 +57,11 @@ searchInput.addEventListener("input", async (event) => {
             );
 
             if (data) {
-                console.log('Prefix results: ', data);
+                updateSuggestions(data.matches);
             }
+        }
+        if (text.length == 0) {
+            updateSuggestions([]);
         }
     } catch (error) {
         console.error('Error fetching search results: ', error);
@@ -85,4 +90,24 @@ function runQuery(query) {
         .then((html) => { resultsContainer.innerHTML = html; })
         .catch(function (error) { console.error('Error fetching search results: ', error); })
     }
+}
+
+function updateSuggestions(suggestions) {
+    suggestionsList.innerHTML = '';
+
+    if (suggestions.length === 0) {
+        suggestionsDropDown.classList.add('hidden');
+        return;
+    }
+
+    suggestions.forEach((suggestion, index) => {
+        const li = document.createElement('li');
+        li.textContent = suggestion;
+        li.className = 'px-4 py-2 hover:bg-gray-100 cursor-pointer';
+
+        // TODO - click handler
+        suggestionsList.appendChild(li);
+    });
+
+    suggestionsDropDown.classList.remove('hidden');
 }
