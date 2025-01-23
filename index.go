@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -255,12 +256,23 @@ func (idx *Index) CatalogContent(filenameIdx int) (content []byte, filename stri
 	return contents, idx.filenames[filenameIdx], true
 }
 
-func (idx *Index) Prefix(prefix string) []string {
-	if idx.prefixTree == nil {
+// Prefix returns a slice of strings of words in the index that have prefix
+// as their own prefix.
+//
+// The count determines the number of matching words to return:
+//   - n > 0: at most n matches
+//   - n == 0: the result in nil (no matches).
+//   - n < 0: all matches
+func (idx *Index) Prefix(prefix string, n int) []string {
+	if idx.prefixTree == nil || n == 0 {
 		return nil
 	}
 
-	return idx.prefixTree.WithPrefix(prefix)
+	matches := idx.prefixTree.WithPrefix(prefix)
+	if n < 0 {
+		return matches
+	}
+	return matches[:min(len(matches), n)]
 }
 
 func loadStringTable(filename string) ([]string, error) {
@@ -332,6 +344,9 @@ func (idx *Index) loadCatalog(r io.Reader) error {
 func loadPrefixTree(filename string) (*Trie, error) {
 	data, err := os.ReadFile(filename)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
 		return nil, err
 	}
 

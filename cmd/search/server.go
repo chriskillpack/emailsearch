@@ -200,7 +200,7 @@ func (s *Server) queryPrefix() http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 
 		if ok && len(query) >= 1 && len(query[0]) >= 3 {
-			res.Matches = s.Index.Prefix(query[0])
+			res.Matches = s.Index.Prefix(query[0], 15)
 		}
 		if err := enc.Encode(&res); err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
