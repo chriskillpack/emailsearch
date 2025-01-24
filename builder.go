@@ -14,6 +14,9 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
+
+	"github.com/schollz/progressbar/v3"
 )
 
 const (
@@ -152,15 +155,26 @@ func (ib *IndexBuilder) InjestFiles(filenames []string, maxSize int64) error {
 		close(outCh)
 	}()
 
+	bar := progressbar.NewOptions(
+		len(filenames),
+		progressbar.OptionSetDescription("Injesting files 1/2"),
+		progressbar.OptionThrottle(50*time.Millisecond),
+		progressbar.OptionOnCompletion(func() { fmt.Println() }),
+	)
+
 	// Retrieve the injested results and sort for a deterministic building of
 	// the main index.
 	ib.injested = make([]injestedFile, 0, len(filenames))
 	for result := range outCh {
 		ib.injested = append(ib.injested, result)
+		bar.Add(1)
 	}
 	slices.SortFunc(ib.injested, func(a, b injestedFile) int {
 		return strings.Compare(a.Filename, b.Filename)
 	})
+
+	bar.Reset()
+	bar.Describe("Injesting files 2/2")
 
 	// This is all single threaded for now
 	for _, result := range ib.injested {
@@ -172,7 +186,9 @@ func (ib *IndexBuilder) InjestFiles(filenames []string, maxSize int64) error {
 		// Merge the file index into the main index
 		ib.MergeInFileIndex(result.Index, result.Filename)
 		ib.nDocs++
+		bar.Add(1)
 	}
+	bar.Finish()
 
 	return nil
 }
@@ -219,34 +235,32 @@ func (ib *IndexBuilder) Serialize(dir string) error {
 	}
 
 	// Filename stringset
+	fmt.Println("Serializing filename stringset")
 	if err := ib.filenames.Serialize(filepath.Join(dir, FilenamesStringTable)); err != nil {
 		return fmt.Errorf("failed to serialize index: %w", err)
 	}
-	fmt.Println("Serialized filename stringset")
 
 	// Word stringset
+	fmt.Println("Serializing word stringset")
 	if err := ib.words.Serialize(filepath.Join(dir, WordsStringTable)); err != nil {
 		return fmt.Errorf("failed to serialize: %w", err)
 	}
-	fmt.Println("Serialized word stringset")
 
 	// Index and offsets file
 	if err := ib.writeIndexAndOffsets(filepath.Join(dir, CorpusIndex), filepath.Join(dir, IndexWordOffsets)); err != nil {
 		return fmt.Errorf("failed to serialize: %w", err)
 	}
-	fmt.Println("Serialized index")
 
 	// Compressed corpus catalog
 	if err := ib.writeCatalog(filepath.Join(dir, CorpusCatalog)); err != nil {
 		return fmt.Errorf("failed to serialize: %w", err)
 	}
-	fmt.Println("Serialized catalog")
 
 	// Build and serialize the prefix tree
+	fmt.Println("Serializing prefix tree")
 	if err := ib.buildAndWritePrefixTree(filepath.Join(dir, QueryPrefixTree)); err != nil {
 		return fmt.Errorf("failed to serialize: %w", err)
 	}
-	fmt.Println("Serialized prefix tree")
 
 	return nil
 }
@@ -271,6 +285,13 @@ func (ib *IndexBuilder) writeIndexAndOffsets(indexFname, offsetsFname string) er
 	out.WriteTo(f)
 
 	sortedWords := slices.Sorted(maps.Keys(ib.wordIndex))
+
+	bar := progressbar.NewOptions(
+		len(sortedWords),
+		progressbar.OptionSetDescription("Serializing index"),
+		progressbar.OptionThrottle(50*time.Millisecond),
+		progressbar.OptionOnCompletion(func() { fmt.Println() }),
+	)
 
 	scratch := make([]byte, binary.MaxVarintLen64*2)
 	for _, word := range sortedWords {
@@ -307,13 +328,15 @@ func (ib *IndexBuilder) writeIndexAndOffsets(indexFname, offsetsFname string) er
 		}
 
 		out.WriteTo(f)
+		bar.Add(1)
 	}
 	f.Close()
+	bar.Finish()
 
+	fmt.Println("Serializing word offsets")
 	if err := writeIndexOffsetsFile(wordCorpusOffsets, offsetsFname); err != nil {
 		return err
 	}
-	fmt.Println("Serialized word offsets")
 
 	return nil
 }
@@ -347,6 +370,13 @@ func (ib *IndexBuilder) writeCatalog(filename string) error {
 	blah, _ := f.Seek(0, io.SeekCurrent)
 	foffset := uint32(blah)
 
+	bar := progressbar.NewOptions(
+		len(ib.injested),
+		progressbar.OptionSetDescription("Serializing catalog"),
+		progressbar.OptionThrottle(50*time.Millisecond),
+		progressbar.OptionOnCompletion(func() { fmt.Println() }),
+	)
+
 	for _, injested := range ib.injested {
 		if injested.Err != nil {
 			continue
@@ -369,12 +399,15 @@ func (ib *IndexBuilder) writeCatalog(filename string) error {
 			panic("offset overflow")
 		}
 		foffset += uint32(len(injested.Compressed))
+
+		bar.Add(1)
 	}
 
 	// Go back and write out the completed offsets table
 	if _, err = f.Seek(4, io.SeekStart); err != nil {
 		return err
 	}
+	bar.Finish()
 
 	return binary.Write(f, binary.BigEndian, offsets)
 }

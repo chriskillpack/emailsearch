@@ -64,11 +64,13 @@ func (ss *StringSet) Flatten() ([]string, int) {
 // Persists the stringset to filepath. The format is binary.
 func (ss *StringSet) Serialize(outpath string) error {
 	strings, maxlen := ss.Flatten()
-	out := &bytes.Buffer{}
 
 	if len(strings) > math.MaxUint32 || maxlen >= math.MaxUint16 {
 		return errTooBigToSave
 	}
+
+	out := &bytes.Buffer{}
+	out.Grow(20 * len(strings)) // Assume avg string length is 20 bytes
 
 	hdr := serializedStringSetHeader{
 		Version:  1,
@@ -89,12 +91,5 @@ func (ss *StringSet) Serialize(outpath string) error {
 		out.WriteString(str)
 	}
 
-	f, err := os.Create(outpath)
-	if err != nil {
-		return err
-	}
-	out.WriteTo(f)
-	f.Close()
-
-	return nil
+	return os.WriteFile(outpath, out.Bytes(), 0666)
 }

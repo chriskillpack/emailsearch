@@ -6,15 +6,17 @@ import (
 	"io/fs"
 	"log"
 	"path/filepath"
+	"time"
 
 	"github.com/chriskillpack/column"
+	"github.com/schollz/progressbar/v3"
 )
 
 var (
 	flagInputPath = flag.String("emails", "/Users/chris/enron_emails/maildir", "directory of emails")
 	flagOutDir    = flag.String("out", "./out", "directory to place generated files")
 	flagThreads   = flag.Int("threads", 10, "threads to use")
-	flagMaxFiles  = flag.Uint("maxfiles", 0, "maximum number of files to inject, 0 to disable limit")
+	flagMaxFiles  = flag.Int("maxfiles", -1, "maximum number of files to inject, -1 to disable limit")
 
 	verboseOutput bool
 )
@@ -28,8 +30,17 @@ func verbose(format string, a ...any) {
 // Walk a path of the filesystem and return the set of files in that path
 // The names of the files are relative to the walk path, so Walk("/home/chris")
 // will return ["foo/cat.txt"] for /home/chris/foo/cat.txt
-func walk(path string) ([]string, int64, error) {
+func walk(path string, n int) ([]string, int64, error) {
 	files := []string{}
+
+	bar := progressbar.NewOptions(
+		n,
+		progressbar.OptionSetDescription("Enumerating files"),
+		progressbar.OptionSpinnerType(14),
+		progressbar.OptionThrottle(50*time.Millisecond),
+		progressbar.OptionShowCount(),
+		progressbar.OptionOnCompletion(func() { fmt.Println() }),
+	)
 
 	var maxSize int64
 	err := filepath.WalkDir(path, func(wpath string, d fs.DirEntry, err error) error {
@@ -41,6 +52,7 @@ func walk(path string) ([]string, int64, error) {
 			return nil
 		}
 
+		bar.Add(1)
 		finfo, err := d.Info()
 		if err != nil {
 			return err
@@ -53,8 +65,16 @@ func walk(path string) ([]string, int64, error) {
 		}
 
 		files = append(files, relpath)
+
+		// If a limit was set and the limit has been exceeded stop walking
+		if n >= 0 && len(files) >= n {
+			return fs.SkipAll
+		}
+
 		return nil // Continue walking
 	})
+
+	bar.Finish()
 
 	return files, maxSize, err
 }
@@ -76,22 +96,13 @@ func main() {
 	}
 	index.Init()
 
-	files, maxSize, err := walk(*flagInputPath)
+	files, maxSize, err := walk(*flagInputPath, *flagMaxFiles)
 	if err != nil {
 		log.Fatal(err)
 	}
-	verbose("Found %d files\n", len(files))
 
-	maxFiles := uint(len(files))
-	if *flagMaxFiles > 0 {
-		maxFiles = min(*flagMaxFiles, maxFiles)
-		verbose("Only injesting first %d files\n", maxFiles)
-	}
+	index.InjestFiles(files, maxSize)
 
-	fmt.Println("Injesting files")
-	index.InjestFiles(files[0:maxFiles], maxSize)
-
-	fmt.Println("Serializing corpus")
 	if err := index.Serialize(*flagOutDir); err != nil {
 		log.Fatal(err)
 	}
