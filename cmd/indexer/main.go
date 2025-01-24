@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"log"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/chriskillpack/column"
@@ -96,10 +97,36 @@ func main() {
 	}
 	index.Init()
 
+	progressChan := make(chan column.InjestUpdate)
+	index.ProgressCh = progressChan
+
 	files, maxSize, err := walk(*flagInputPath, *flagMaxFiles)
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	bar := progressbar.NewOptions(
+		len(files),
+		progressbar.OptionSetDescription("Injesting files 1/2"),
+		progressbar.OptionThrottle(50*time.Millisecond),
+		progressbar.OptionOnCompletion(func() { fmt.Println() }),
+	)
+	go func() {
+		fn := sync.OnceFunc(func() {
+			bar.Reset()
+			bar.Describe("Injesting files 2/2")
+		})
+
+		for p := range progressChan {
+			bar.Add(1)
+
+			if p.Phase == 2 {
+				fn()
+			}
+		}
+
+		bar.Finish()
+	}()
 
 	index.InjestFiles(files, maxSize)
 

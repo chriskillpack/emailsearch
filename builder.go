@@ -34,9 +34,10 @@ const (
 var emailWordsRe = regexp.MustCompile(`[^\s]+(?:'[^\s]+)*`)
 
 type IndexBuilder struct {
-	Verbose   bool
-	NThreads  int
-	InputPath string
+	Verbose    bool
+	NThreads   int
+	InputPath  string
+	ProgressCh chan<- InjestUpdate
 
 	filenames *StringSet
 	words     *StringSet
@@ -66,6 +67,12 @@ type injestedFile struct {
 	Len        int    // length of the indexed content in the file
 	Compressed []byte // gzip compressed copy of filedata that was injested
 	Err        error  // error during processing
+}
+
+type InjestUpdate struct {
+	Filename string
+	Success  bool
+	Phase    int
 }
 
 func (i *IndexBuilder) Init() {
@@ -155,26 +162,24 @@ func (ib *IndexBuilder) InjestFiles(filenames []string, maxSize int64) error {
 		close(outCh)
 	}()
 
-	bar := progressbar.NewOptions(
-		len(filenames),
-		progressbar.OptionSetDescription("Injesting files 1/2"),
-		progressbar.OptionThrottle(50*time.Millisecond),
-		progressbar.OptionOnCompletion(func() { fmt.Println() }),
-	)
-
 	// Retrieve the injested results and sort for a deterministic building of
 	// the main index.
 	ib.injested = make([]injestedFile, 0, len(filenames))
 	for result := range outCh {
 		ib.injested = append(ib.injested, result)
-		bar.Add(1)
+
+		if ib.ProgressCh != nil {
+			success := result.Err == nil
+			ib.ProgressCh <- InjestUpdate{
+				result.Filename,
+				success,
+				1,
+			}
+		}
 	}
 	slices.SortFunc(ib.injested, func(a, b injestedFile) int {
 		return strings.Compare(a.Filename, b.Filename)
 	})
-
-	bar.Reset()
-	bar.Describe("Injesting files 2/2")
 
 	// This is all single threaded for now
 	for _, result := range ib.injested {
@@ -186,9 +191,18 @@ func (ib *IndexBuilder) InjestFiles(filenames []string, maxSize int64) error {
 		// Merge the file index into the main index
 		ib.MergeInFileIndex(result.Index, result.Filename)
 		ib.nDocs++
-		bar.Add(1)
+
+		if ib.ProgressCh != nil {
+			ib.ProgressCh <- InjestUpdate{
+				result.Filename,
+				true,
+				2,
+			}
+		}
 	}
-	bar.Finish()
+	if ib.ProgressCh != nil {
+		close(ib.ProgressCh)
+	}
 
 	return nil
 }
