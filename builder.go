@@ -14,9 +14,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"time"
-
-	"github.com/schollz/progressbar/v3"
 )
 
 const (
@@ -34,10 +31,11 @@ const (
 var emailWordsRe = regexp.MustCompile(`[^\s]+(?:'[^\s]+)*`)
 
 type IndexBuilder struct {
-	Verbose    bool
-	NThreads   int
-	InputPath  string
-	ProgressCh chan<- InjestUpdate
+	Verbose             bool
+	NThreads            int
+	InputPath           string
+	InjestProgressCh    chan<- InjestUpdate
+	SerializeProgressCh chan<- SerializeUpdate
 
 	filenames *StringSet
 	words     *StringSet
@@ -73,6 +71,26 @@ type InjestUpdate struct {
 	Filename string
 	Success  bool
 	Phase    int
+}
+
+const (
+	SerializePhase_FilenameSet = 1
+	SerializePhase_WordsSet    = 2
+	SerializePhase_Index       = 3
+	SerializePhase_Catalog     = 4
+	SerializePhase_Trie        = 5
+
+	SerializeEvent_BeginPhase    = 0
+	SerializeEvent_EndPhase      = 1
+	SerializeEvent_ProgressPhase = 2
+)
+
+// SerializeUpdate holds information about a progress change in the Serialize
+// method.
+type SerializeUpdate struct {
+	Event int // See SerializeEvent_* constants
+	Phase int // See SerializePhase_* constants
+	N     int // Number of items
 }
 
 func (i *IndexBuilder) Init() {
@@ -168,14 +186,8 @@ func (ib *IndexBuilder) InjestFiles(filenames []string, maxSize int64) error {
 	for result := range outCh {
 		ib.injested = append(ib.injested, result)
 
-		if ib.ProgressCh != nil {
-			success := result.Err == nil
-			ib.ProgressCh <- InjestUpdate{
-				result.Filename,
-				success,
-				1,
-			}
-		}
+		success := result.Err == nil
+		ib.injestUpdate(InjestUpdate{result.Filename, success, 1})
 	}
 	slices.SortFunc(ib.injested, func(a, b injestedFile) int {
 		return strings.Compare(a.Filename, b.Filename)
@@ -192,16 +204,10 @@ func (ib *IndexBuilder) InjestFiles(filenames []string, maxSize int64) error {
 		ib.MergeInFileIndex(result.Index, result.Filename)
 		ib.nDocs++
 
-		if ib.ProgressCh != nil {
-			ib.ProgressCh <- InjestUpdate{
-				result.Filename,
-				true,
-				2,
-			}
-		}
+		ib.injestUpdate(InjestUpdate{result.Filename, true, 2})
 	}
-	if ib.ProgressCh != nil {
-		close(ib.ProgressCh)
+	if ib.InjestProgressCh != nil {
+		close(ib.InjestProgressCh)
 	}
 
 	return nil
@@ -248,32 +254,36 @@ func (ib *IndexBuilder) Serialize(dir string) error {
 		return err
 	}
 
-	// Filename stringset
+	// Filename stringset (phase 1)
 	fmt.Println("Serializing filename stringset")
 	if err := ib.filenames.Serialize(filepath.Join(dir, FilenamesStringTable)); err != nil {
 		return fmt.Errorf("failed to serialize index: %w", err)
 	}
 
-	// Word stringset
+	// Word stringset (phase 2)
 	fmt.Println("Serializing word stringset")
 	if err := ib.words.Serialize(filepath.Join(dir, WordsStringTable)); err != nil {
 		return fmt.Errorf("failed to serialize: %w", err)
 	}
 
-	// Index and offsets file
+	// Index and offsets file (phase 3)
 	if err := ib.writeIndexAndOffsets(filepath.Join(dir, CorpusIndex), filepath.Join(dir, IndexWordOffsets)); err != nil {
 		return fmt.Errorf("failed to serialize: %w", err)
 	}
 
-	// Compressed corpus catalog
+	// Compressed corpus catalog (phase 4)
 	if err := ib.writeCatalog(filepath.Join(dir, CorpusCatalog)); err != nil {
 		return fmt.Errorf("failed to serialize: %w", err)
 	}
 
-	// Build and serialize the prefix tree
+	// Build and serialize the prefix tree (phase 5)
 	fmt.Println("Serializing prefix tree")
 	if err := ib.buildAndWritePrefixTree(filepath.Join(dir, QueryPrefixTree)); err != nil {
 		return fmt.Errorf("failed to serialize: %w", err)
+	}
+
+	if ib.SerializeProgressCh != nil {
+		close(ib.SerializeProgressCh)
 	}
 
 	return nil
@@ -300,12 +310,11 @@ func (ib *IndexBuilder) writeIndexAndOffsets(indexFname, offsetsFname string) er
 
 	sortedWords := slices.Sorted(maps.Keys(ib.wordIndex))
 
-	bar := progressbar.NewOptions(
-		len(sortedWords),
-		progressbar.OptionSetDescription("Serializing index"),
-		progressbar.OptionThrottle(50*time.Millisecond),
-		progressbar.OptionOnCompletion(func() { fmt.Println() }),
-	)
+	ib.serializeUpdate(SerializeUpdate{
+		Event: SerializeEvent_BeginPhase,
+		Phase: SerializePhase_Index,
+		N:     len(sortedWords),
+	})
 
 	scratch := make([]byte, binary.MaxVarintLen64*2)
 	for _, word := range sortedWords {
@@ -342,10 +351,19 @@ func (ib *IndexBuilder) writeIndexAndOffsets(indexFname, offsetsFname string) er
 		}
 
 		out.WriteTo(f)
-		bar.Add(1)
+
+		ib.serializeUpdate(SerializeUpdate{
+			Event: SerializeEvent_ProgressPhase,
+			Phase: SerializePhase_Index,
+			N:     1,
+		})
 	}
 	f.Close()
-	bar.Finish()
+
+	ib.serializeUpdate(SerializeUpdate{
+		Event: SerializeEvent_EndPhase,
+		Phase: SerializePhase_Index,
+	})
 
 	fmt.Println("Serializing word offsets")
 	if err := writeIndexOffsetsFile(wordCorpusOffsets, offsetsFname); err != nil {
@@ -384,12 +402,11 @@ func (ib *IndexBuilder) writeCatalog(filename string) error {
 	blah, _ := f.Seek(0, io.SeekCurrent)
 	foffset := uint32(blah)
 
-	bar := progressbar.NewOptions(
-		len(ib.injested),
-		progressbar.OptionSetDescription("Serializing catalog"),
-		progressbar.OptionThrottle(50*time.Millisecond),
-		progressbar.OptionOnCompletion(func() { fmt.Println() }),
-	)
+	ib.serializeUpdate(SerializeUpdate{
+		Event: SerializeEvent_BeginPhase,
+		Phase: SerializePhase_Catalog,
+		N:     len(ib.injested),
+	})
 
 	for _, injested := range ib.injested {
 		if injested.Err != nil {
@@ -414,14 +431,22 @@ func (ib *IndexBuilder) writeCatalog(filename string) error {
 		}
 		foffset += uint32(len(injested.Compressed))
 
-		bar.Add(1)
+		ib.serializeUpdate(SerializeUpdate{
+			Event: SerializeEvent_ProgressPhase,
+			Phase: SerializePhase_Catalog,
+			N:     1,
+		})
 	}
 
 	// Go back and write out the completed offsets table
 	if _, err = f.Seek(4, io.SeekStart); err != nil {
 		return err
 	}
-	bar.Finish()
+
+	ib.serializeUpdate(SerializeUpdate{
+		Event: SerializeEvent_EndPhase,
+		Phase: SerializePhase_Catalog,
+	})
 
 	return binary.Write(f, binary.BigEndian, offsets)
 }

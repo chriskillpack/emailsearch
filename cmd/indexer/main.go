@@ -20,6 +20,15 @@ var (
 	flagMaxFiles  = flag.Int("maxfiles", -1, "maximum number of files to inject, -1 to disable limit")
 
 	verboseOutput bool
+
+	serializePhaseDescriptions = []string{
+		"",
+		"Serializing filename stringset",
+		"Serializing word stringset",
+		"Serializing index",
+		"Serializing catalog",
+		"Serializing prefix tree",
+	}
 )
 
 func verbose(format string, a ...any) {
@@ -97,27 +106,32 @@ func main() {
 	}
 	index.Init()
 
-	progressChan := make(chan column.InjestUpdate)
-	index.ProgressCh = progressChan
+	indexProgressChan := make(chan column.InjestUpdate)
+	serializeProgressChan := make(chan column.SerializeUpdate)
+	index.InjestProgressCh = indexProgressChan
+	index.SerializeProgressCh = serializeProgressChan
 
 	files, maxSize, err := walk(*flagInputPath, *flagMaxFiles)
 	if err != nil {
 		log.Fatal(err)
 	}
 
+	// The injestion progress bar
 	bar := progressbar.NewOptions(
 		len(files),
 		progressbar.OptionSetDescription("Injesting files 1/2"),
 		progressbar.OptionThrottle(50*time.Millisecond),
 		progressbar.OptionOnCompletion(func() { fmt.Println() }),
 	)
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
 		fn := sync.OnceFunc(func() {
 			bar.Reset()
 			bar.Describe("Injesting files 2/2")
 		})
 
-		for p := range progressChan {
+		for p := range indexProgressChan {
 			bar.Add(1)
 
 			if p.Phase == 2 {
@@ -126,9 +140,33 @@ func main() {
 		}
 
 		bar.Finish()
+		wg.Done()
 	}()
-
 	index.InjestFiles(files, maxSize)
+	wg.Wait() // allow progress bar to catch up
+
+	// The serialize progress bar
+	bar = progressbar.NewOptions(
+		10, // This will be updated
+		progressbar.OptionThrottle(50*time.Millisecond),
+		progressbar.OptionOnCompletion(func() { fmt.Println() }),
+	)
+	go func() {
+		for p := range serializeProgressChan {
+			switch p.Event {
+			case column.SerializeEvent_BeginPhase:
+				// Starting a new q phase
+				bar.ChangeMax(p.N)
+				bar.Reset()
+				bar.Set(0)
+				bar.Describe(serializePhaseDescriptions[p.Phase])
+			case column.SerializeEvent_EndPhase:
+				bar.Finish()
+			case column.SerializeEvent_ProgressPhase:
+				bar.Add(p.N)
+			}
+		}
+	}()
 
 	if err := index.Serialize(*flagOutDir); err != nil {
 		log.Fatal(err)
