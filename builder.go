@@ -6,14 +6,15 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"iter"
 	"maps"
 	"net/mail"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"sync"
+	"unicode"
 )
 
 const (
@@ -24,11 +25,6 @@ const (
 	CorpusCatalog        = "corpus.cat"
 	QueryPrefixTree      = "query.trie"
 )
-
-// RE to split on spaces and include ' in the word
-// TODO: try a regex that doesn't include trailing punctation such as ,?! and :
-// `[^\s]+(?:'[^\s]+)*(?<![.,:;!?"])`
-var emailWordsRe = regexp.MustCompile(`[^\s]+(?:'[^\s]+)*`)
 
 type IndexBuilder struct {
 	Verbose             bool
@@ -213,21 +209,50 @@ func (ib *IndexBuilder) InjestFiles(filenames []string, maxSize int64) error {
 	return nil
 }
 
+// TODO: It doesn't handle lines that end with =XX where XX is a number
 func (idx *IndexBuilder) computeFileIndex(content []byte) fileIndex {
 	// Find all the words in the email body
-	// It doesn't handle lines that end with =XX where XX is a number
 	index := make(fileIndex)
-	for _, word := range emailWordsRe.FindAllIndex(content, -1) {
-		txt := string(content[word[0]:word[1]])
+
+	s := string(content) // TODO: investigate memory / perf hit of this
+	for span := range splitText(s) {
+		word := s[span.start:span.end]
+		txt := strings.ToLower(word)
 
 		if _, ok := index[txt]; !ok {
-			index[txt] = []int{word[0]}
+			index[txt] = []int{span.start}
 		} else {
-			index[txt] = append(index[txt], word[0])
+			index[txt] = append(index[txt], span.start)
 		}
 	}
 
 	return index
+}
+
+type wordSpan struct {
+	start, end int
+}
+
+func splitText(text string) iter.Seq[wordSpan] {
+	return func(yield func(wordSpan) bool) {
+		var start int = -1
+
+		for i, r := range text {
+			if (unicode.IsLetter(r) || unicode.IsDigit(r)) && start == -1 {
+				start = i
+			} else if !(unicode.IsLetter(r) && !unicode.IsDigit(r)) && start != -1 {
+				if (!yield(wordSpan{start, i})) {
+					return
+				}
+
+				start = -1
+			}
+		}
+
+		if start != -1 {
+			yield(wordSpan{start, len(text)})
+		}
+	}
 }
 
 func (c *IndexBuilder) MergeInFileIndex(fileIndex fileIndex, filename string) {
@@ -318,8 +343,6 @@ func (ib *IndexBuilder) writeIndexAndOffsets(indexFname, offsetsFname string) er
 
 	scratch := make([]byte, binary.MaxVarintLen64*2)
 	for _, word := range sortedWords {
-		matches := ib.wordIndex[word]
-
 		widx, _ := ib.words.Index(word)
 		wordCorpusOffsets[widx].WordIndex = uint32(widx)
 		foff, err := f.Seek(0, io.SeekCurrent) // TODO - replace with something else
@@ -328,6 +351,7 @@ func (ib *IndexBuilder) writeIndexAndOffsets(indexFname, offsetsFname string) er
 		}
 		wordCorpusOffsets[widx].Offset = foff
 
+		matches := ib.wordIndex[word]
 		n := binary.PutUvarint(scratch, uint64(len(matches)))
 		if _, err := out.Write(scratch[:n]); err != nil {
 			return err
@@ -467,13 +491,34 @@ func (ib *IndexBuilder) buildAndWritePrefixTree(filename string) error {
 	return os.WriteFile(filename, data, 0666)
 }
 
+func (ib *IndexBuilder) injestUpdate(u InjestUpdate) {
+	if ib.InjestProgressCh != nil {
+		ib.InjestProgressCh <- u
+	}
+}
+
+func (ib *IndexBuilder) serializeUpdate(u SerializeUpdate) {
+	if ib.SerializeProgressCh != nil {
+		ib.SerializeProgressCh <- u
+	}
+}
+
 func writeIndexOffsetsFile(wordCorpusOffsets []serializedWordIndexOffset, filename string) error {
 	if int(uint32(len(wordCorpusOffsets))) != len(wordCorpusOffsets) {
 		panic("number of documents exceeds file format limits")
 	}
 
+	// File format of the index offsets file
+	// 0x00: u32 Version number (currently 1)
+	// 0x04: u32 Number of entries in the table
+	// 0x08: u32 Index of word 0 in the words stringset
+	// 0x0C: s64 Byte offset in the index for word 0 matches
+	// 0x14: u32 Index of word 1 in the words stringset
+	// 0x18: s64 Byte offset in the index for word 1 matches
+	// ....:
+	// ....: u32 Index of word N-1 in the words stringset
+	// ....: s64 Byte offset in the index for word N-1 matches
 	buf := &bytes.Buffer{}
-
 	hdr := serializedWordOffsetHeader{
 		Version:    1,
 		NumEntries: uint32(len(wordCorpusOffsets)),
@@ -485,14 +530,7 @@ func writeIndexOffsetsFile(wordCorpusOffsets []serializedWordIndexOffset, filena
 		return err
 	}
 
-	f, err := os.Create(filename)
-	if err != nil {
-		return err
-	}
-	_, err = buf.WriteTo(f)
-	f.Close()
-
-	return err
+	return os.WriteFile(filename, buf.Bytes(), 0666)
 }
 
 // Reads everything from the Reader r into data starting from the front. It
