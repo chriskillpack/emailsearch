@@ -94,6 +94,9 @@ searchInput.addEventListener('keydown', function(e) {
         case 'Enter':
             if (currentSuggestionIndex !== -1) {
                 selectSuggestion(suggestionsList.children[currentSuggestionIndex]);
+            } else {
+                clearSuggestions();
+                handleSearch();
             }
             break
     }
