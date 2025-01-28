@@ -5,10 +5,6 @@ and persisting it to disk.
 
 The basic approach was to build a search index that mapped a word to every file (email) and it's location in the email body. I made the decision to discard the headers to get something working but with more time I would have included them.
 
-# Code quality
-
-I have left some commented out code in the file. These are there to show some of the dead ends I went down working on this problem.
-
 # Pre-processor
 
 cmd/column walks the input set of files and parses each in turn as email. It discards the headers and then tokenizes the body of each email. For each word (token) it finds, it inserts into a map along with the file and it's byte offset in the email body.
@@ -49,7 +45,7 @@ The corpus file can be memory mapped and accessed to read out the match informat
 
 # Searching
 
-On disk we store the generated files:
+The indexer takes the input email direction and generates the following in the output directory:
 ```
 dir/
   corpus.index - The generated search index
@@ -57,17 +53,10 @@ dir/
   filenames.sid - The string table of email filenames
   words.sid - The string table of words in the corpus
   word.offsets - The offsets of each word into corpus.index
+  query.trie - The words in the index stored in a prefix tree
 ```
 
 The search algorithm would take each word and look it up in `words.sid` to retrieve `word_index`. `word.offsets` would be indexed by word_index to retrieve the match offset into the corpus file. Seek to that location in the file (or memory address if using memory mapping) and then read in the match information. This will give you a list of files (technically filename indices) and offsets within the email body where that word occurs. Use the filename indices with `filenames.sid` to retrieve the names of the files. With this information each email can be loaded and shown to the user.
-
-# Extensions
-
-* I would build a prefix tree (trie) for all the words in the corpus. This would allow multiple searches to be done, e.g. a search of the trie for "app" would also return "apple", "application", "appliance", "apply", etc. These multiple words could then be used as search terms.
-
-* Refine the email tokenizer. It has problems such as dealing with quotation, and I did not spend any time fixing the issues.
-
-* Add email headers to the corpus as part of the search time.
 
 # TODO
 
