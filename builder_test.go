@@ -34,3 +34,45 @@ func TestSplitText(t *testing.T) {
 		})
 	}
 }
+
+func TestIsStopWord(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		expected bool
+	}{
+		// Test exact matches from the stop words list
+		{"common word 'the'", "the", true},
+		{"common word 'be'", "be", true},
+		{"common word 'to'", "to", true},
+		{"common word 'of'", "of", true},
+		{"common word 'and'", "and", true},
+
+		// Test different cases
+		{"uppercase word", "THE", true},
+		{"mixed case word", "ThE", true},
+		{"mixed case 'AnD'", "AnD", true},
+
+		// Test non-stop words
+		{"uncommon word", "elephant", false},
+		{"empty string", "", false},
+		{"number", "123", false},
+		{"special characters", "!@#", false},
+		{"longer word", "something", false},
+
+		// Test edge cases
+		{"single letter non-stop word", "x", false},
+		{"single letter stop word 'i'", "i", true},
+		{"whitespace", " ", false},
+		{"stop word with spaces", " the ", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := isStopWord(tc.input)
+			if result != tc.expected {
+				t.Errorf("isStopWord(%q) = %v; want %v", tc.input, result, tc.expected)
+			}
+		})
+	}
+}

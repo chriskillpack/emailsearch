@@ -219,6 +219,16 @@ func (idx *IndexBuilder) computeFileIndex(content []byte) fileIndex {
 		word := s[span.start:span.end]
 		txt := strings.ToLower(word)
 
+		// Ignore short words
+		if len(word) < 3 {
+			continue
+		}
+
+		// Ignore stop words
+		if isStopWord(word) {
+			continue
+		}
+
 		if _, ok := index[txt]; !ok {
 			index[txt] = []int{span.start}
 		} else {
@@ -253,6 +263,30 @@ func splitText(text string) iter.Seq[wordSpan] {
 			yield(wordSpan{start, len(text)})
 		}
 	}
+}
+
+var (
+	iswOnce sync.Once
+	swMap   map[string]struct{}
+)
+
+func isStopWord(s string) bool {
+	// Top 20 taken from https://en.wikipedia.org/wiki/Most_common_words_in_English
+	var stopWords = []string{
+		"the", "be", "to", "of", "and",
+		"a", "in", "that", "have", "i",
+		"it", "for", "not", "on", "with",
+		"he", "as", "you", "do", "at",
+	}
+	iswOnce.Do(func() {
+		swMap = make(map[string]struct{})
+		for _, s := range stopWords {
+			swMap[s] = struct{}{}
+		}
+	})
+
+	_, exists := swMap[strings.ToLower(s)]
+	return exists
 }
 
 func (c *IndexBuilder) MergeInFileIndex(fileIndex fileIndex, filename string) {

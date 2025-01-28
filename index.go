@@ -136,10 +136,17 @@ func (idx *Index) QueryIndex(querywords []string) ([]QueryResults, error) {
 	resultsmap := make(map[int][]QueryWordMatch)
 
 	for _, query := range querywords {
+		lquery := strings.ToLower(query)
+
+		// Skip stop words
+		if isStopWord(lquery) {
+			continue
+		}
+
 		// Lookup the word in the word strings table
 		wordIdx := -1
 		for i, word := range idx.words {
-			if strings.EqualFold(word, query) {
+			if word == lquery {
 				wordIdx = i
 				break
 			}
@@ -268,11 +275,28 @@ func (idx *Index) Prefix(prefix string, n int) []string {
 		return nil
 	}
 
-	matches := idx.prefixTree.WithPrefix(prefix)
+	matches := idx.prefixTree.WithPrefix(strings.ToLower(prefix))
+
+	// Filter out stop words
+	matches = filterFunc(matches, func(s string) bool { return !isStopWord(s) })
+
 	if n < 0 {
 		return matches
 	}
+
 	return matches[:min(len(matches), n)]
+}
+
+func filterFunc(x []string, f func(string) bool) []string {
+	out := make([]string, 0, len(x))
+
+	for _, a := range x {
+		if f(a) {
+			out = append(out, a)
+		}
+	}
+
+	return out
 }
 
 func loadStringTable(filename string) ([]string, error) {
