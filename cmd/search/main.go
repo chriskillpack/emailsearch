@@ -43,7 +43,11 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	srv := NewServer(idx, "8080")
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	srv := NewServer(idx, port)
 
 	go func() {
 		if err := srv.Start(); err != nil && err != http.ErrServerClosed {
