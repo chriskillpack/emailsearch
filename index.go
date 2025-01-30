@@ -51,6 +51,7 @@ type Index struct {
 	words          []string
 	offsets        []serializedWordIndexOffset
 	contentOffsets []catalogContentsOffset
+	wordsToOffsets map[string]int64
 	prefixTree     *Trie
 	CorpusSize     int
 
@@ -81,6 +82,8 @@ func LoadIndexFromDisk(indexdir string) (*Index, error) {
 	if len(idx.offsets) != len(idx.words) {
 		return nil, fmt.Errorf("data mismatch")
 	}
+
+	idx.buildWordOffsetsMap()
 
 	idx.prefixTree, err = loadPrefixTree(filepath.Join(indexdir, QueryPrefixTree))
 	if err != nil {
@@ -143,26 +146,9 @@ func (idx *Index) QueryIndex(querywords []string) ([]QueryResults, error) {
 			continue
 		}
 
-		// Lookup the word in the word strings table
-		wordIdx := -1
-		for i, word := range idx.words {
-			if word == lquery {
-				wordIdx = i
-				break
-			}
-		}
-		if wordIdx == -1 {
-			// If the word isn't found move onto the next one
-			continue
-		}
-
-		// Look up the offset into the search index
-		var offset int64
-		for _, off := range idx.offsets {
-			if int(off.WordIndex) == wordIdx {
-				offset = int64(off.Offset)
-				break
-			}
+		offset, exists := idx.wordsToOffsets[lquery]
+		if !exists {
+			break
 		}
 
 		// Not possible to have a valid offset of 0 because these are file offsets and there is a header
@@ -285,6 +271,16 @@ func (idx *Index) Prefix(prefix string, n int) []string {
 	}
 
 	return matches[:min(len(matches), n)]
+}
+
+func (idx *Index) buildWordOffsetsMap() {
+	idx.wordsToOffsets = make(map[string]int64)
+
+	// Walk the offsets table
+	for _, wo := range idx.offsets {
+		word := idx.words[wo.WordIndex]
+		idx.wordsToOffsets[word] = wo.Offset
+	}
 }
 
 func filterFunc(x []string, f func(string) bool) []string {
