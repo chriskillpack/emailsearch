@@ -27,7 +27,6 @@ const (
 )
 
 type IndexBuilder struct {
-	Verbose             bool
 	NThreads            int
 	InputPath           string
 	InjestProgressCh    chan<- InjestUpdate
@@ -97,12 +96,6 @@ func (i *IndexBuilder) Init() {
 	})
 }
 
-func (ib *IndexBuilder) verbose(format string, a ...any) {
-	if ib.Verbose {
-		fmt.Printf(format, a...)
-	}
-}
-
 func (ib *IndexBuilder) InjestFiles(filenames []string, maxSize int64) error {
 	// 32-bit overflow check
 	if int(uint32(len(filenames))) != len(filenames) {
@@ -158,11 +151,7 @@ func (ib *IndexBuilder) InjestFiles(filenames []string, maxSize int64) error {
 
 	// Spin up a goroutine to insert the filenames
 	go func() {
-		for i, file := range filenames {
-			if i == 0 || ((i % 10000) == 0) || i == len(filenames)-1 {
-				ib.verbose("%d -> %s\n", i, file)
-			}
-
+		for _, file := range filenames {
 			inCh <- file
 		}
 		close(inCh)

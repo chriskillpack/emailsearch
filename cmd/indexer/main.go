@@ -100,7 +100,6 @@ func main() {
 	verbose("Running with %d threads\n", *flagThreads)
 
 	index := column.IndexBuilder{
-		Verbose:   verboseOutput,
 		NThreads:  *flagThreads,
 		InputPath: *flagInputPath,
 	}
