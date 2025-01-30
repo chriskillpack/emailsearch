@@ -1,26 +1,27 @@
-# Email search index
+# Email Search
 
-I was not able to complete the problem in time. I only got as far as generating the search index
-and persisting it to disk.
+This project started as a time limited take home project for an engineering role I applied for. I passed the take home but the project never left my head and I continued to work on it. And thus this.
 
-The basic approach was to build a search index that mapped a word to every file (email) and it's location in the email body. I made the decision to discard the headers to get something working but with more time I would have included them.
+The only tested email corpus supported is the [Enron email archive](https://www.cs.cmu.edu/~enron/enron_mail_20150507.tar.gz).
 
-# Pre-processor
+# Indexing emails
 
-cmd/column walks the input set of files and parses each in turn as email. It discards the headers and then tokenizes the body of each email. For each word (token) it finds, it inserts into a map along with the file and it's byte offset in the email body.
+The search engine requires a search index, which is the job of `cmd/indexer`. This program walks a corpus of mailbox messages (RFC 5322 and 6532), injesting the bodies of emails and producing a series of data files which is writes to an output directory.
 
-As a file is very likely to appear multiple times in the index, I maintained a table of the unique set of filenames and the corpus stores an index into that set.
+The main data file is called the index. This data structure maps every word seen to every file it occurs in and it's location within those files. The location is an offset from the beginning of the message body. As emails typically contain many words, and those words are likely to appear in multiple emails, this can make the index pretty large. As a space saving technique the search index stores each filename only once, in a filename stringset, and instead stores the (confusingly named) file index in the index.
 
 ### An example
 
-The file `"example.email"` has the body `"presentation sent"`. This will create two entries in the index, `"presentation"` and `"sent"`. The entries will look like this
+Injesting the email file `example.email` with the body `presentation sent`. The indexer adds `example.email` to the filename set, and receives the index 0 in return. It will then create two entries in index, one for each word in the email body, `"presentation"` and `"sent"`. The index will look similar to this:
 
 ```
 "presentation" -> [{filename_index: 0, offsets: [0]}]
 "sent" -> [{filename_index: 0, offsets: [13]}]
 ```
 
-If a second email `scandal.email` with the body `"fraud presentation here"` is injested into the index new entries will be added and the resulting structures will look like this
+That reads as *the word "presentation" can be found at message offset 0 in filename_index 0 (`example.email`). The word "sent" can be found at message offset 13 in filename_index 0*.
+
+Now the indexer injests a second email `scandal.email` with the body `fraud presentation here`. Again the indexer inserts the filename and this time receives the index 1. It adds two new entries to the index for `"fraud"` and `"here"` and extends the existing entry for `"presentation"`. This is what the index will look like now:
 
 ```
 "presentation" -> [{filename_index: 0, offsets: [0]}, {filename_index: 1, offsets: [6]}]
@@ -29,19 +30,26 @@ If a second email `scandal.email` with the body `"fraud presentation here"` is i
 "here" -> [{filename_index: 1, offsets: [19]}]
 ```
 
-The unique set of filenames and words is written out to disk as `filenames.sid` and `words.sid`. These are a newline based text format using the simple schema
+We will focus only on the extended entry for `"presentation"`. Now this entry reads *"presentation" is found in two files: file index 0 (`example.email`) at offset 0, and also in file index 1 (`scandal.email`) at offset 6*.
+
+Strictly speaking the indexer doesn't need to track filenames beyond indexing, but the set is saved out to disk for the search engine to use for presentation purposes.
+
+Similar to filenames the indexer does not store words literally in the index, instead representing each word encountered with a unique word index. If we assume the following word index mapping `word_index 0 = "presentation", word_index 1 = "sent", word_index 2 = "fraud" and word_index 3 = "here"` then the index is actually stored like this
 
 ```
-{INDEX}: {STRING}
-...
-{INDEX}: {STRING}
+word_index 0 -> [{filename_index: 0, offsets: [0]}, {filename_index: 1, offsets: [6]}]
+word_index 2 -> [{filename_index: 1, offsets: [0]}]
+word_index 1 -> [{filename_index: 0, offsets: [13]}]
+word_index 3 -> [{filename_index: 1, offsets: [19]}]
 ```
 
-This schema was chosen for readability and ease of serializing and parsing.
+Notice that the index is not sorted by word_index order, this is not something that the search engine requires. This avoids shared coordination of index allocation which makes parallelizing index generation easier.
 
-The generated corpus is quite large (on the order of 1G) and loading this into device memory may not be possible. To allow for efficient searches we create another file "word.offsets" which stores two int32 entries for each word in the corpus. The first word is the word index in the words.sid file and the second if the byte offset into the corpus file. This way only words.sid, filenames.sid and word.offsets have to be loaded into memory (a total of 102Mb)
+Unlike filenames, which can be discarded, the word -> word index mapping is required by the search engine. This is how it will map words in the query into indices in the map.
 
-The corpus file can be memory mapped and accessed to read out the match information.
+TODO - rewrite this section. ~The generated corpus is quite large (on the order of 1G) and loading this into device memory may not be possible. To allow for efficient searches we create another file `word.offsets` which stores two int32 entries for each word in the corpus. The first word is the word index in the words.sid file and the second if the byte offset into the corpus file. This way only words.sid, filenames.sid and word.offsets have to be loaded into memory (a total of 102Mb).
+
+The corpus file can be memory mapped and accessed to read out the match information.~
 
 # Searching
 
