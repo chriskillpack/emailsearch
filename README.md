@@ -73,9 +73,9 @@ The search algorithm would take each word and look it up in `words.sid` to retri
 # Performance improvements
 
 * Parallelization of email injestion greatly improved performance. This also includes the binary string set file format as well:
-go run ./cmd/column --out parallel_out --threads 50  143.34s user 49.86s system 278% cpu 1:09.31 total
+go run ./cmd/indexer --out parallel_out --threads 50  143.34s user 49.86s system 278% cpu 1:09.31 total
 
 For comparison, previous single threaded performance (with text stringset file format)
-go run ./cmd/column --out out  168.98s user 311.53s system 82% cpu 9:39.31 total
+go run ./cmd/indexer --out out  168.98s user 311.53s system 82% cpu 9:39.31 total
 
 With parallelization the output is no longer deterministic because we have no guarantees over insertion order into the main index. TODO - order insertion.

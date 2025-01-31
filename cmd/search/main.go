@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chriskillpack/column"
+	"github.com/chriskillpack/emailsearch"
 )
 
 var (
@@ -22,7 +22,7 @@ var (
 func main() {
 	flag.Parse()
 
-	idx, err := column.LoadIndexFromDisk(*flagIndexDir)
+	idx, err := emailsearch.LoadIndexFromDisk(*flagIndexDir)
 	if err != nil {
 		log.Fatal(err)
 	}

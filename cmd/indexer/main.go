@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chriskillpack/column"
+	"github.com/chriskillpack/emailsearch"
 	"github.com/schollz/progressbar/v3"
 )
 
@@ -99,14 +99,14 @@ func main() {
 	}
 	verbose("Running with %d threads\n", *flagThreads)
 
-	index := column.IndexBuilder{
+	index := emailsearch.IndexBuilder{
 		NThreads:  *flagThreads,
 		InputPath: *flagInputPath,
 	}
 	index.Init()
 
-	indexProgressChan := make(chan column.InjestUpdate)
-	serializeProgressChan := make(chan column.SerializeUpdate)
+	indexProgressChan := make(chan emailsearch.InjestUpdate)
+	serializeProgressChan := make(chan emailsearch.SerializeUpdate)
 	index.InjestProgressCh = indexProgressChan
 	index.SerializeProgressCh = serializeProgressChan
 
@@ -153,15 +153,15 @@ func main() {
 	go func() {
 		for p := range serializeProgressChan {
 			switch p.Event {
-			case column.SerializeEvent_BeginPhase:
+			case emailsearch.SerializeEvent_BeginPhase:
 				// Starting a new q phase
 				bar.ChangeMax(p.N)
 				bar.Reset()
 				bar.Set(0)
 				bar.Describe(serializePhaseDescriptions[p.Phase])
-			case column.SerializeEvent_EndPhase:
+			case emailsearch.SerializeEvent_EndPhase:
 				bar.Finish()
-			case column.SerializeEvent_ProgressPhase:
+			case emailsearch.SerializeEvent_ProgressPhase:
 				bar.Add(p.N)
 			}
 		}

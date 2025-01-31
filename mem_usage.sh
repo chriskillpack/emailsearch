@@ -2,7 +2,7 @@
 
 # Script to print out the amount of memory used by the indexer. Prints out
 # new value once a second.
-PID=$(pgrep column)  # Change the name if the filename changes
+PID=$(pgrep indexer)  # Change the name if the filename changes
 
 while true; do
     ps_output=$(ps -o pid,rss -p $PID)

@@ -1,4 +1,4 @@
-package column
+package emailsearch
 
 import "iter"
 

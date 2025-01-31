@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chriskillpack/column"
+	"github.com/chriskillpack/emailsearch"
 )
 
 var (
@@ -34,7 +34,7 @@ var (
 type Server struct {
 	hs *http.Server
 
-	Index *column.Index
+	Index *emailsearch.Index
 }
 
 type matchHighlight struct {
@@ -53,7 +53,7 @@ func init() {
 	emailTmpl = template.Must(template.ParseFS(tmplFS, "tmpl/email.html"))
 }
 
-func NewServer(idx *column.Index, port string) *Server {
+func NewServer(idx *emailsearch.Index, port string) *Server {
 	srv := &Server{Index: idx}
 	srv.hs = &http.Server{
 		Addr:    net.JoinHostPort("0.0.0.0", port),
@@ -83,7 +83,7 @@ func (s *Server) serveHandler() http.Handler {
 
 func (s *Server) serveSearch() http.HandlerFunc {
 	type SearchResult struct {
-		Result      column.QueryResults
+		Result      emailsearch.QueryResults
 		PathSegment string
 	}
 
@@ -222,7 +222,7 @@ func (s *Server) serveRoot() http.HandlerFunc {
 }
 
 // Encode the search result and all match locations into []byte
-func generateEmailURL(result column.QueryResults) []byte {
+func generateEmailURL(result emailsearch.QueryResults) []byte {
 	blob := make([]byte, 0, 256)
 	blob = binary.AppendUvarint(blob, uint64(result.FilenameIndex))
 	blob = binary.AppendUvarint(blob, uint64(len(result.WordMatches)))
