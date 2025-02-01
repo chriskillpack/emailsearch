@@ -140,9 +140,12 @@ type QueryResults struct {
 // instead of grouping find results by file, should we group by word?
 // how do we prefer if file A has all 3 query words, vs B which has 2?
 func (idx *Index) QueryIndex(querywords []string) ([]QueryResults, error) {
-	resultsmap := make(map[int][]QueryWordMatch)
+	qwres := make([]map[int][]QueryWordMatch, len(querywords))
+	for i := range len(querywords) {
+		qwres[i] = make(map[int][]QueryWordMatch)
+	}
 
-	for _, query := range querywords {
+	for qi, query := range querywords {
 		lquery := strings.ToLower(query)
 
 		// Skip stop words
@@ -184,12 +187,16 @@ func (idx *Index) QueryIndex(querywords []string) ([]QueryResults, error) {
 				}
 				matchOffsets[j] = uint32(off)
 
-				resultsmap[int(fidx)] = append(resultsmap[int(fidx)], QueryWordMatch{query, int(matchOffsets[j])})
+				qwres[qi][int(fidx)] = append(qwres[qi][int(fidx)], QueryWordMatch{query, int(matchOffsets[j])})
 			}
 		}
 	}
 
-	for _, wordmatches := range resultsmap {
+	// Intersect all the query result maps which implements keyword1 AND keyword2 AND ...
+	searchresults := intersectWordResults(qwres)
+
+	// Sort the combined results so that matches are in increasing order
+	for _, wordmatches := range searchresults {
 		// Sort the words in each entry by increasing offset
 		slices.SortFunc[[]QueryWordMatch](wordmatches, func(a, b QueryWordMatch) int {
 			if a.Offset < b.Offset {
@@ -206,8 +213,8 @@ func (idx *Index) QueryIndex(querywords []string) ([]QueryResults, error) {
 	// In cases when the number of matches is the same for now sort the filename
 	// lexicographically. TODO - a better scoring criteria would consider how many
 	// of the query words are in each file and secondly how close together they are
-	results := make([]QueryResults, 0, len(resultsmap))
-	for fidx, wordmatches := range resultsmap {
+	results := make([]QueryResults, 0, len(searchresults))
+	for fidx, wordmatches := range searchresults {
 		results = append(results, QueryResults{idx.filenames[fidx], wordmatches, fidx})
 	}
 	slices.SortFunc(results, func(a, b QueryResults) int {
@@ -225,6 +232,37 @@ func (idx *Index) QueryIndex(querywords []string) ([]QueryResults, error) {
 	})
 
 	return results, nil
+}
+
+// intersectWordResults combines the search results for the individual query words
+// together into a final result set. Currently this is done by computing the
+// intersection the separate results.
+func intersectWordResults(results []map[int][]QueryWordMatch) map[int][]QueryWordMatch {
+	if len(results) == 0 {
+		return nil
+	}
+
+	final := make(map[int][]QueryWordMatch)
+	firstMap := results[0]
+
+	for k, v := range firstMap {
+		found := true
+		temp := slices.Clone(v) // do not modify firstMap
+
+		for _, m := range results[1:] {
+			if _, ok := m[k]; ok {
+				temp = append(temp, m[k]...)
+			} else {
+				found = false
+				break
+			}
+		}
+		if found {
+			final[k] = temp
+		}
+	}
+
+	return final
 }
 
 // CatalogContent returns the content and filename of an indexed file.
