@@ -146,13 +146,13 @@ func (t *Trie) serializeNode(node *TrieNode) []byte {
 }
 
 func deserializeNode(br *bytes.Reader, level int) *TrieNode {
-	node := &TrieNode{
-		Children: make(map[rune]*TrieNode),
-	}
+	node := &TrieNode{}
 	binary.Read(br, binary.BigEndian, &node.IsWord)
 
 	var nc uint16
 	binary.Read(br, binary.BigEndian, &nc)
+	node.Children = make(map[rune]*TrieNode, nc)
+
 	for range nc {
 		r, _, _ := br.ReadRune()
 		node.Children[r] = deserializeNode(br, level+1)
