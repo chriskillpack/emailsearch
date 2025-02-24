@@ -1,3 +1,5 @@
+//go:generate tailwindcss --minify --input build/in.css --output static/tailwind.css
+
 package main
 
 import (
