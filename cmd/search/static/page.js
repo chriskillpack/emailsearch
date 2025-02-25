@@ -106,12 +106,6 @@ function handleSearch() {
     runQuery(searchInput.value.trim());
 }
 
-function handleKeyUp(event) {
-    if (event.code === 'Enter') {
-        runQuery(searchInput.value.trim());
-    }
-}
-
 function clearSuggestions() {
     updateSuggestions([]);
 }

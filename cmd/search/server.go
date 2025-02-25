@@ -34,7 +34,8 @@ var (
 )
 
 type Server struct {
-	hs *http.Server
+	hs     *http.Server
+	logger *log.Logger
 
 	Index *emailsearch.Index
 }
@@ -56,7 +57,7 @@ func init() {
 }
 
 func NewServer(idx *emailsearch.Index, port string) *Server {
-	srv := &Server{Index: idx}
+	srv := &Server{Index: idx, logger: log.Default()}
 	srv.hs = &http.Server{
 		Addr:    net.JoinHostPort("0.0.0.0", port),
 		Handler: srv.serveHandler(),
@@ -75,10 +76,10 @@ func (s *Server) Shutdown(ctx context.Context) error {
 func (s *Server) serveHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /static/", http.FileServerFS(staticFS))
-	mux.Handle("GET /search", s.serveSearch())
+	mux.Handle("GET /search", s.logRequest(s.serveSearch()))
 	mux.Handle("GET /prefix", s.queryPrefix())
-	mux.Handle("GET /email/{email}", s.retrieveEmail())
-	mux.Handle("GET /", s.serveRoot())
+	mux.Handle("GET /email/{email}", s.logRequest(s.retrieveEmail()))
+	mux.Handle("GET /", s.logRequest(s.serveRoot()))
 
 	return mux
 }
@@ -107,7 +108,8 @@ func (s *Server) serveSearch() http.HandlerFunc {
 		start := time.Now()
 		queryparts := strings.Split(query[0], " ")
 		queryresults, err := s.Index.QueryIndex(queryparts)
-		end := time.Now()
+		duration := time.Since(start)
+		s.logger.Printf("serveSearch query=%v", queryparts)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
@@ -127,7 +129,6 @@ func (s *Server) serveSearch() http.HandlerFunc {
 
 		w.WriteHeader(http.StatusOK)
 
-		duration := end.Sub(start)
 		data := struct {
 			Query        string
 			NumResults   int
@@ -137,7 +138,7 @@ func (s *Server) serveSearch() http.HandlerFunc {
 			NDocuments   int
 		}{query[0], len(queryresults), totMatches, duration.String(), searchResults, s.Index.CorpusSize}
 		if err := resultsPartialTmpl.Execute(w, data); err != nil {
-			log.Printf("Error rendering template %s\n", err)
+			s.logger.Printf("Error rendering template %s\n", err)
 			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		}
 	}
@@ -158,7 +159,7 @@ func (s *Server) retrieveEmail() http.HandlerFunc {
 
 		urlData, err := base64.URLEncoding.DecodeString(emailP)
 		if err != nil {
-			log.Printf("Failed Base64 decode")
+			s.logger.Printf("Failed Base64 decode")
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 			return
 		}
@@ -174,6 +175,7 @@ func (s *Server) retrieveEmail() http.HandlerFunc {
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 			return
 		}
+		s.logger.Printf("retrieveEmail %q", filename)
 
 		hc := highlightContent(content, highlights.Highlights)
 		data := struct {
@@ -181,7 +183,7 @@ func (s *Server) retrieveEmail() http.HandlerFunc {
 			Filename string
 		}{template.HTML(string(hc)), filename}
 		if err := emailTmpl.Execute(w, data); err != nil {
-			log.Printf("Error rendering template %s\n", err)
+			s.logger.Printf("Error rendering template %s\n", err)
 			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		}
 	}
@@ -221,6 +223,41 @@ func (s *Server) serveRoot() http.HandlerFunc {
 		}{query}
 		indexTmpl.Execute(w, data)
 	}
+}
+
+// Request logging middleware
+func (s *Server) logRequest(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		start := time.Now()
+
+		lrw := newLoggingResponseWriter(w)
+		next.ServeHTTP(lrw, req)
+
+		duration := time.Since(start)
+
+		s.logger.Printf("method=%s path=%s status=%d duration=%s",
+			req.Method,
+			req.URL.EscapedPath(),
+			lrw.statusCode,
+			duration)
+	})
+}
+
+// loggingResponseWriter wraps an http.ResponseWriter to capture the set
+// statusCode. This is necessary because the status code is unexported and
+// there is no read method.
+type loggingResponseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func newLoggingResponseWriter(w http.ResponseWriter) *loggingResponseWriter {
+	return &loggingResponseWriter{w, 0}
+}
+
+func (lrw *loggingResponseWriter) WriteHeader(code int) {
+	lrw.statusCode = code
+	lrw.ResponseWriter.WriteHeader(code)
 }
 
 // Encode the search result and all match locations into []byte
