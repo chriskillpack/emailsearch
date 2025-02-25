@@ -22,10 +22,13 @@ var (
 func main() {
 	flag.Parse()
 
+	start := time.Now()
 	idx, err := emailsearch.LoadIndexFromDisk(*flagIndexDir)
 	if err != nil {
 		log.Fatal(err)
 	}
+	duration := time.Since(start)
+	log.Printf("Ready, took %s to load index", duration.String())
 
 	if *flagQuery != "" {
 		results, err := idx.QueryIndex([]string{*flagQuery})
