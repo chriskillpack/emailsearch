@@ -1,0 +1,3 @@
+# Trie File Format
+
+**TODO**

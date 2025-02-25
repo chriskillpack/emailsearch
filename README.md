@@ -4,6 +4,10 @@ This project started as a time limited take home project for an engineering role
 
 The only tested email corpus supported is the [Enron email archive](https://www.cs.cmu.edu/~enron/enron_mail_20150507.tar.gz).
 
+# Technical Documents
+
+Read more about the [internal file formats](docs/index.md).
+
 # Indexing emails
 
 The search engine requires a search index, which is the job of `cmd/indexer`. This program walks a corpus of mailbox messages (RFC 5322 and 6532), injesting the bodies of emails and producing a series of data files which is writes to an output directory.
