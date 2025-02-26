@@ -1,1 +1,16 @@
 @import "tailwindcss";
+
+/* Combined styling class for a search result in the results list */
+.searchresult {
+    @apply p-4 bg-white rounded-lg border border-gray-200 hover:bg-blue-50 hover:border-gray-300 transition-all;
+}
+
+/* Combined styling class for the match count in a search result */
+.matchcount {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800
+}
+
+/* Combine styling class for match highlights in show email */
+.matchhighlight {
+    @apply bg-yellow-200 px-1 rounded
+}

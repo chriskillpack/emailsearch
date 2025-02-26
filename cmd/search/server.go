@@ -278,7 +278,7 @@ func generateEmailURL(result emailsearch.QueryResults) []byte {
 }
 
 const (
-	openMarkTag  = "<mark>"
+	openMarkTag  = `<mark class="matchhighlight">`
 	closeMarkTag = "</mark>"
 )
 
