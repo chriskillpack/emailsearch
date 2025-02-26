@@ -182,9 +182,10 @@ func (s *Server) retrieveEmail() http.HandlerFunc {
 
 		hc := highlightContent(content, highlights.Highlights)
 		data := struct {
-			Contents template.HTML
-			Filename string
-		}{template.HTML(string(hc)), filename}
+			Contents   template.HTML
+			Filename   string
+			NumMatches int
+		}{template.HTML(string(hc)), filename, len(highlights.Highlights)}
 		if err := emailTmpl.Execute(w, data); err != nil {
 			s.logger.Printf("Error rendering template %s\n", err)
 			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
