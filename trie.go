@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"slices"
 )
 
 type TrieNode struct {
@@ -137,9 +138,15 @@ func (t *Trie) serializeNode(node *TrieNode) []byte {
 	nc := uint16(len(node.Children))
 	binary.Write(buf, binary.BigEndian, nc)
 
-	for ch, nd := range node.Children {
-		buf.WriteRune(ch)
-		buf.Write(t.serializeNode(nd))
+	keys := make([]rune, 0, len(node.Children))
+	for r := range node.Children {
+		keys = append(keys, r)
+	}
+	slices.Sort(keys)
+
+	for _, r := range keys {
+		buf.WriteRune(r)
+		buf.Write(t.serializeNode(node.Children[r]))
 	}
 
 	return buf.Bytes()
