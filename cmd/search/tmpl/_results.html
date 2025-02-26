@@ -1,14 +1,14 @@
-<div>
-    The query <strong>{{.Query}}</strong> was found {{.NumMatches}} times across {{.NumResults}} documents.
+The query <strong>{{.Query}}</strong> was found {{.NumMatches}} times across {{.NumResults}} documents.
 
-    {{- if gt .NumResults (len .Results)}}
-        <em>Only printing the first {{len .Results}} results.</em>
-    {{end}}
-    <br>
-    Query took {{.ResponseTime}} to search {{.NDocuments}} documents.
-    <br>
+{{- if gt .NumResults (len .Results)}}
+    <em>Only printing the first {{len .Results}} results.</em>
+{{end}}
+<br>
+Query took {{.ResponseTime}} to search {{.NDocuments}} documents.
+<br>
+<div>
     {{- range .Results}}
-        <div class="p-4 bg-white rounded-lg border border-gray-200 hover:border-gray-300 hover:shadow-sm transition-all">
+        <div class="p-4 bg-white rounded-lg border border-gray-200 hover:bg-blue-50 hover:border-gray-300 transition-all">
             <div class="flex items-center justify-between">
                 <div class="flex items-center space-x-2">
                     <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
