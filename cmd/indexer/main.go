@@ -110,6 +110,8 @@ func main() {
 	index.InjestProgressCh = indexProgressChan
 	index.SerializeProgressCh = serializeProgressChan
 
+	start := time.Now()
+
 	files, maxSize, err := walk(*flagInputPath, *flagMaxFiles)
 	if err != nil {
 		log.Fatal(err)
@@ -170,4 +172,7 @@ func main() {
 	if err := index.Serialize(*flagOutDir); err != nil {
 		log.Fatal(err)
 	}
+
+	duration := time.Since(start)
+	fmt.Printf("Success. Took %s to run.\n", duration.String())
 }

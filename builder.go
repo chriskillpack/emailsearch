@@ -561,17 +561,17 @@ func writeIndexOffsetsFile(wordCorpusOffsets []serializedWordIndexOffset, filena
 // error. If an EOF is encountered the function assumes success and returns
 // a nil error in that case.
 func readAllInto(data []byte, r io.Reader) (int, error) {
-	off := 0
-	for {
-		n, err := r.Read(data[off:cap(data)])
-		off += n
-		if err != nil {
-			if err == io.EOF {
-				err = nil
-			}
-			return off, err
+	n, err := io.ReadFull(r, data)
+	if err != nil {
+		// The input buffer is sized large enough for the biggest file, so for
+		// every other file we expected io.ErrUnexpectedEOF, and that's okay
+		// it means we read to the end of the file.
+		if err == io.ErrUnexpectedEOF {
+			err = nil
 		}
+		return n, err
 	}
+	return n, nil
 }
 
 func createOutDir(dir string) error {
