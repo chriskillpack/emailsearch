@@ -59,8 +59,11 @@ func init() {
 func NewServer(idx *emailsearch.Index, port string) *Server {
 	srv := &Server{Index: idx, logger: log.Default()}
 	srv.hs = &http.Server{
-		Addr:    net.JoinHostPort("0.0.0.0", port),
-		Handler: srv.serveHandler(),
+		Addr:         net.JoinHostPort("0.0.0.0", port),
+		Handler:      srv.serveHandler(),
+		ReadTimeout:  3 * time.Second,
+		WriteTimeout: 6 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
 	return srv
 }
