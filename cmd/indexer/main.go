@@ -14,7 +14,7 @@ import (
 )
 
 var (
-	flagInputPath = flag.String("emails", "/Users/chris/enron_emails/maildir", "directory of emails")
+	flagInputPath = flag.String("emails", "", "directory of emails")
 	flagOutDir    = flag.String("out", "./out", "directory to place generated files")
 	flagThreads   = flag.Int("threads", 10, "threads to use")
 	flagMaxFiles  = flag.Int("maxfiles", -1, "maximum number of files to inject, -1 to disable limit")
@@ -23,11 +23,12 @@ var (
 
 	serializePhaseDescriptions = []string{
 		"",
-		"Serializing filename stringset",
-		"Serializing word stringset",
-		"Serializing index  ",
-		"Serializing catalog",
-		"Serializing prefix tree",
+		"Serializing filenames   ",
+		"Serializing words       ",
+		"Serializing index       ",
+		"Serializing catalog     ",
+		"Serializing word offsets",
+		"Serializing prefix tree ",
 	}
 )
 
@@ -45,7 +46,7 @@ func walk(path string, n int) ([]string, int64, error) {
 
 	bar := progressbar.NewOptions(
 		n,
-		progressbar.OptionSetDescription("Enumerating files  "),
+		progressbar.OptionSetDescription("Enumerating files       "),
 		progressbar.OptionSpinnerType(14),
 		progressbar.OptionThrottle(50*time.Millisecond),
 		progressbar.OptionShowCount(),
@@ -94,6 +95,9 @@ func main() {
 	flag.BoolVar(&verboseOutput, "verbose", false, "Verbose output")
 	flag.Parse()
 
+	if *flagInputPath == "" {
+		log.Fatal("emails path cannot be empty")
+	}
 	if *flagThreads <= 0 || *flagThreads > 100 {
 		log.Fatal("Threads needs to be between 1 and 100")
 	}
@@ -120,7 +124,7 @@ func main() {
 	// The injestion progress bar
 	bar := progressbar.NewOptions(
 		len(files),
-		progressbar.OptionSetDescription("Injesting files 1/2"),
+		progressbar.OptionSetDescription("Injesting files 1/2     "),
 		progressbar.OptionThrottle(50*time.Millisecond),
 		progressbar.OptionOnCompletion(func() { fmt.Println() }),
 	)
@@ -129,7 +133,7 @@ func main() {
 	go func() {
 		fn := sync.OnceFunc(func() {
 			bar.Reset()
-			bar.Describe("Injesting files 2/2")
+			bar.Describe("Injesting files 2/2     ")
 		})
 
 		for p := range indexProgressChan {
@@ -152,6 +156,7 @@ func main() {
 		progressbar.OptionThrottle(50*time.Millisecond),
 		progressbar.OptionOnCompletion(func() { fmt.Println() }),
 	)
+	wg.Add(1)
 	go func() {
 		for p := range serializeProgressChan {
 			switch p.Event {
@@ -167,6 +172,8 @@ func main() {
 				bar.Add(p.N)
 			}
 		}
+
+		wg.Done()
 	}()
 
 	if err := index.Serialize(*flagOutDir); err != nil {
@@ -174,5 +181,7 @@ func main() {
 	}
 
 	duration := time.Since(start)
+	wg.Wait() // Allow progress bar to catch up
+
 	fmt.Printf("Success. Took %s to run.\n", duration.String())
 }

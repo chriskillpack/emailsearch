@@ -68,24 +68,29 @@ type InjestUpdate struct {
 	Phase    int
 }
 
-const (
-	SerializePhase_FilenameSet = 1
-	SerializePhase_WordsSet    = 2
-	SerializePhase_Index       = 3
-	SerializePhase_Catalog     = 4
-	SerializePhase_Trie        = 5
+type SerializePhase int
 
-	SerializeEvent_BeginPhase    = 0
-	SerializeEvent_EndPhase      = 1
-	SerializeEvent_ProgressPhase = 2
+const (
+	SerializePhase_FilenameSet SerializePhase = iota + 1
+	SerializePhase_WordsSet
+	SerializePhase_Index
+	SerializePhase_Catalog
+	SerializePhase_WordOffsets
+	SerializePhase_PrefixTree
+)
+
+const (
+	SerializeEvent_BeginPhase = iota
+	SerializeEvent_EndPhase
+	SerializeEvent_ProgressPhase
 )
 
 // SerializeUpdate holds information about a progress change in the Serialize
 // method.
 type SerializeUpdate struct {
-	Event int // See SerializeEvent_* constants
-	Phase int // See SerializePhase_* constants
-	N     int // Number of items
+	Event int            // See SerializeEvent_* constants
+	Phase SerializePhase // See SerializePhase_* constants
+	N     int            // Number of items
 }
 
 func (i *IndexBuilder) Init() {
@@ -303,15 +308,13 @@ func (ib *IndexBuilder) Serialize(dir string) error {
 	}
 
 	// Filename stringset (phase 1)
-	fmt.Println("Serializing filename stringset")
-	if err := ib.filenames.Serialize(filepath.Join(dir, FilenamesStringTable)); err != nil {
-		return fmt.Errorf("failed to serialize index: %w", err)
+	if err := ib.serializeStringSet(ib.filenames, filepath.Join(dir, FilenamesStringTable), SerializePhase_FilenameSet); err != nil {
+		return fmt.Errorf("failed to serialize filename string set: %w", err)
 	}
 
 	// Word stringset (phase 2)
-	fmt.Println("Serializing word stringset")
-	if err := ib.words.Serialize(filepath.Join(dir, WordsStringTable)); err != nil {
-		return fmt.Errorf("failed to serialize: %w", err)
+	if err := ib.serializeStringSet(ib.words, filepath.Join(dir, WordsStringTable), SerializePhase_WordsSet); err != nil {
+		return fmt.Errorf("failed to serialize word string set: %w", err)
 	}
 
 	// Index and offsets file (phase 3)
@@ -325,7 +328,6 @@ func (ib *IndexBuilder) Serialize(dir string) error {
 	}
 
 	// Build and serialize the prefix tree (phase 5)
-	fmt.Println("Serializing prefix tree")
 	if err := ib.buildAndWritePrefixTree(filepath.Join(dir, QueryPrefixTree)); err != nil {
 		return fmt.Errorf("failed to serialize: %w", err)
 	}
@@ -335,6 +337,22 @@ func (ib *IndexBuilder) Serialize(dir string) error {
 	}
 
 	return nil
+}
+
+func (ib *IndexBuilder) serializeStringSet(set *StringSet, filepath string, phase SerializePhase) error {
+	update := SerializeUpdate{
+		Event: SerializeEvent_BeginPhase,
+		Phase: phase,
+		N:     1,
+	}
+	ib.serializeUpdate(update)
+
+	err := set.Serialize(filepath)
+
+	update.Event = SerializeEvent_EndPhase
+	ib.serializeUpdate(update)
+
+	return err
 }
 
 func (ib *IndexBuilder) writeIndexAndOffsets(indexFname, offsetsFname string) error {
@@ -413,8 +431,7 @@ func (ib *IndexBuilder) writeIndexAndOffsets(indexFname, offsetsFname string) er
 		Phase: SerializePhase_Index,
 	})
 
-	fmt.Println("Serializing word offsets")
-	if err := writeIndexOffsetsFile(wordCorpusOffsets, offsetsFname); err != nil {
+	if err := ib.writeIndexOffsetsFile(wordCorpusOffsets, offsetsFname); err != nil {
 		return err
 	}
 
@@ -522,6 +539,13 @@ func (ib *IndexBuilder) writeCatalog(filename string) error {
 }
 
 func (ib *IndexBuilder) buildAndWritePrefixTree(filename string) error {
+	update := SerializeUpdate{
+		Event: SerializeEvent_BeginPhase,
+		Phase: SerializePhase_PrefixTree,
+		N:     1,
+	}
+	ib.serializeUpdate(update)
+
 	trie := NewTrie()
 
 	words, _ := ib.words.Flatten()
@@ -534,7 +558,12 @@ func (ib *IndexBuilder) buildAndWritePrefixTree(filename string) error {
 		return err
 	}
 
-	return os.WriteFile(filename, data, 0666)
+	err = os.WriteFile(filename, data, 0666)
+
+	update.Event = SerializeEvent_EndPhase
+	ib.serializeUpdate(update)
+
+	return err
 }
 
 func (ib *IndexBuilder) injestUpdate(u InjestUpdate) {
@@ -549,10 +578,17 @@ func (ib *IndexBuilder) serializeUpdate(u SerializeUpdate) {
 	}
 }
 
-func writeIndexOffsetsFile(wordCorpusOffsets []serializedWordIndexOffset, filename string) error {
+func (ib *IndexBuilder) writeIndexOffsetsFile(wordCorpusOffsets []serializedWordIndexOffset, filename string) error {
 	if int(uint32(len(wordCorpusOffsets))) != len(wordCorpusOffsets) {
 		panic("number of documents exceeds file format limits")
 	}
+
+	update := SerializeUpdate{
+		Event: SerializeEvent_BeginPhase,
+		Phase: SerializePhase_WordOffsets,
+		N:     1,
+	}
+	ib.serializeUpdate(update)
 
 	// File format of the index offsets file
 	// 0x00: u32 Magic number 'WRDO'
@@ -578,7 +614,12 @@ func writeIndexOffsetsFile(wordCorpusOffsets []serializedWordIndexOffset, filena
 		return err
 	}
 
-	return os.WriteFile(filename, buf.Bytes(), 0666)
+	err := os.WriteFile(filename, buf.Bytes(), 0666)
+
+	update.Event = SerializeEvent_EndPhase
+	ib.serializeUpdate(update)
+
+	return err
 }
 
 // Reads everything from the Reader r into data starting from the front. It

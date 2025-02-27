@@ -52,7 +52,7 @@ func (s *Set[E]) Union(a *Set[E]) *Set[E] {
 // Intersect returns a new set which is the intersection of s and a
 func (s *Set[E]) Intersect(a *Set[E]) *Set[E] {
 	r := NewSet[E]()
-	for k, _ := range a.elems {
+	for k := range a.elems {
 		if s.Has(k) {
 			r.Insert(k)
 		}

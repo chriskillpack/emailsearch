@@ -16,12 +16,6 @@ import (
 )
 
 // Index file format structures
-type serializedMatch struct {
-	FilenameIndex uint32
-	NumOffsets    uint32
-	// Followed by NumOffsets of uint32
-}
-
 const indexMagic uint32 = 'I'<<24 | 'N'<<16 | 'D'<<8 | 'X'
 
 type serializedIndexHeader struct {
