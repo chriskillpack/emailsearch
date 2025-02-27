@@ -1,5 +1,7 @@
 # Email Search
 
+[Check it out](https://emailsearch.fly.dev/).
+
 This project started as a time limited take home project for an engineering role I applied for. I passed the take home but the project never left my head and I continued to work on it: and thus this.
 
 The only tested email corpus supported is the [Enron email archive](https://www.cs.cmu.edu/~enron/enron_mail_20150507.tar.gz).
@@ -116,6 +118,18 @@ dir/
 ```
 
 The search algorithm would take each word and look it up in `words.sid` to retrieve `word_index`. `word.offsets` would be indexed by word_index to retrieve the match offset into the corpus file. Seek to that location in the file (or memory address if using memory mapping) and then read in the match information. This will give you a list of files (technically filename indices) and offsets within the email body where that word occurs. Use the filename indices with `filenames.sid` to retrieve the names of the files. With this information each email can be loaded and shown to the user.
+
+# Deployment
+
+The website is hosted on [Fly](https://fly.io). To deploy you will need `flyctl` installed, [instructions](https://fly.io/docs/flyctl/install/).
+
+**Important** The email index is read-only and the easiest way to ship it to Fly is in the docker image. We use a layered docker image with a `data` layer to achieve this. The data layer copies the email index from the directory `email_index`. Any changes to this directory and you will have a large [~800Mbs] upload ahead of you. As a result I try and avoid changes to this directory, or batch up multiple changes into a single deploy.
+
+To deploy:
+
+```
+$ fly deploy
+```
 
 # TODO
 
