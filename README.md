@@ -1,16 +1,51 @@
 # Email Search
 
-This project started as a time limited take home project for an engineering role I applied for. I passed the take home but the project never left my head and I continued to work on it. And thus this.
+This project started as a time limited take home project for an engineering role I applied for. I passed the take home but the project never left my head and I continued to work on it: and thus this.
 
 The only tested email corpus supported is the [Enron email archive](https://www.cs.cmu.edu/~enron/enron_mail_20150507.tar.gz).
 
 # Indexing emails
 
-The search engine requires a search index, which is the job of `cmd/indexer`. This program walks a corpus of mailbox messages (RFC 5322 and 6532), injesting the bodies of emails and producing a series of data files which is writes to an output directory.
+The search engine requires a search index, the production of which is the responsibility of `cmd/indexer`. This program walks a corpus of mailbox messages (RFC 5322 and 6532), extracting words from email bodies (headers are ignored for now) and outputting a directory of data files which comprise the search index.
 
-The main data file is called the index. This data structure maps every word seen to every file it occurs in and it's location within those files. The location is an offset from the beginning of the message body. As emails typically contain many words, and those words are likely to appear in multiple emails, this can make the index pretty large. As a space saving technique the search index stores each filename only once, in a filename stringset, and instead stores the (confusingly named) file index in the index.
+The main data file is called the index. This data structure maps every word to every file it occurs in and it's locations within those files. The location is an offset from the beginning of the message body. As emails typically contain many words, and those words are likely to appear in multiple emails, this can make the index pretty large. As a space saving technique the search index stores each filename only once, in a filename stringset, and instead stores the (confusingly named) file index in the index.
 
-### An example
+## Running the indexer
+
+```
+$ go run ./cmd/indexer --emails /path/to/enron_emails --out email_index
+⠹ Enumerating files        (517401/-) [9s]
+Injesting files 1/2      100% |████████████████████████████████████████|
+Injesting files 2/2      100% |████████████████████████████████████████|
+Serializing filenames    100% |████████████████████████████████████████|
+Serializing words        100% |████████████████████████████████████████|
+Serializing index        100% |████████████████████████████████████████|
+Serializing word offsets 100% |████████████████████████████████████████|
+Serializing catalog      100% |████████████████████████████████████████|
+Serializing prefix tree  100% |████████████████████████████████████████|
+Success. Took 3m29.460381125s to run.
+```
+
+There are some command line flags to control the indexer
+
+```
+$ go run ./cmd/indexer help
+  -emails string
+        directory of emails
+  -maxfiles int
+        maximum number of files to inject, -1 to disable limit (default -1)
+  -out string
+        directory to place generated files (default "./out")
+  -threads int
+        threads to use (default 10)
+  -v    Verbose output
+  -verbose
+        Verbose output
+```
+
+### Index datastructure example
+
+TODO: Move into a technical document.
 
 Injesting the email file `example.email` with the body `presentation sent`. The indexer adds `example.email` to the filename set, and receives the index 0 in return. It will then create two entries in index, one for each word in the email body, `"presentation"` and `"sent"`. The index will look similar to this:
 
@@ -51,7 +86,23 @@ TODO - rewrite this section. ~The generated corpus is quite large (on the order 
 
 The corpus file can be memory mapped and accessed to read out the match information.~
 
-# Searching
+# Search interface
+
+Start the web server
+
+```
+$ go run ./cmd/search --indexdir=email_index
+Loaded filename strings table: 517401 entries
+Loaded words strings table: 595111 entries
+Loaded word offsets table: 595111 entries
+Loaded prefix tree
+2025/02/27 13:55:58 Ready, took 618.383834ms to load index
+
+```
+
+The server listens on `0.0.0.0:8080` though the port can be changed via the `PORT` environment variable.
+
+## Search algorithm
 
 The indexer takes the input email direction and generates the following in the output directory:
 ```
@@ -68,6 +119,8 @@ The search algorithm would take each word and look it up in `words.sid` to retri
 
 # TODO
 
+* Add support for [Okapi BM25](https://en.wikipedia.org/wiki/Okapi_BM25) result ranking. This is a popular ranking mechanism that should be within scope of this system.
+* Explore replacing the Trie data structure with a Radix tree. The current Trie has a lot of nodes and uses a lot of memory.
 * Go 1.23 introduced string interning. Use that to reduces index generation working memory size. Currently max RSS usage on full maildir is 6370Mb.
 
 # Performance improvements
