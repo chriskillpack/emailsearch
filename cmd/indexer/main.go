@@ -25,7 +25,7 @@ var (
 		"",
 		"Serializing filename stringset",
 		"Serializing word stringset",
-		"Serializing index",
+		"Serializing index  ",
 		"Serializing catalog",
 		"Serializing prefix tree",
 	}
@@ -45,7 +45,7 @@ func walk(path string, n int) ([]string, int64, error) {
 
 	bar := progressbar.NewOptions(
 		n,
-		progressbar.OptionSetDescription("Enumerating files"),
+		progressbar.OptionSetDescription("Enumerating files  "),
 		progressbar.OptionSpinnerType(14),
 		progressbar.OptionThrottle(50*time.Millisecond),
 		progressbar.OptionShowCount(),

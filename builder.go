@@ -349,6 +349,7 @@ func (ib *IndexBuilder) writeIndexAndOffsets(indexFname, offsetsFname string) er
 	out := &bytes.Buffer{}
 
 	bc := serializedIndexHeader{
+		Magic:      indexMagic,
 		Version:    1,
 		NumEntries: uint64(len(ib.wordIndex)),
 		CorpusSize: uint32(ib.nDocs), // guaranteed value won't overflow uint32
@@ -421,6 +422,10 @@ func (ib *IndexBuilder) writeIndexAndOffsets(indexFname, offsetsFname string) er
 }
 
 func (ib *IndexBuilder) writeCatalog(filename string) error {
+	if int(uint32(len(ib.injested))) != len(ib.injested) {
+		panic("number of catalog items exceeds file format limits")
+	}
+
 	f, err := os.Create(filename)
 	if err != nil {
 		return err
@@ -428,11 +433,13 @@ func (ib *IndexBuilder) writeCatalog(filename string) error {
 	defer f.Close()
 
 	// File format of the catalog
-	// 0x00: u32 Number of catalog entries (N) in offset table
-	// 0x04: u32 File offset to compressed content of file index 0
-	// 0x08: u32 Length of uncompressed content of file index 0
-	// 0x0C: u32 File offset to compressed content of file index 1
-	// 0x10: u32 Length of uncompressed content of file index 1
+	// 0x00: u32 Magic number 'CTLG'
+	// 0x04: u32 Version number
+	// 0x08: u32 Number of catalog entries (N) in offset table
+	// 0x0C: u32 File offset to compressed content of file index 0
+	// 0x10: u32 Length of uncompressed content of file index 0
+	// 0x14: u32 File offset to compressed content of file index 1
+	// 0x18: u32 Length of uncompressed content of file index 1
 	// ....:
 	// ....: u32 File offset to compressed content of file index N-1
 	// ....: u32 Length of uncompressed content of file index N-1
@@ -443,11 +450,26 @@ func (ib *IndexBuilder) writeCatalog(filename string) error {
 	// If an offset and length are 0 it means that there is no stored content
 	// for the corresponding file. This can happen because there was an error
 	// indexing the files content.
-	binary.Write(f, binary.BigEndian, uint32(len(ib.injested)))
+	hdr := serializedCatalogHeader{
+		Magic:      catalogMagic,
+		Version:    1,
+		NumEntries: uint32(len(ib.injested)),
+	}
+	if err := binary.Write(f, binary.BigEndian, &hdr); err != nil {
+		return err
+	}
+	hdrEnd, err := f.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return err
+	}
 	offsets := make([]uint32, len(ib.injested)*2)
-	binary.Write(f, binary.BigEndian, offsets) // write out as a placeholder
-	blah, _ := f.Seek(0, io.SeekCurrent)
-	foffset := uint32(blah)
+	if err := binary.Write(f, binary.BigEndian, offsets); err != nil { // write out as a placeholder
+		return err
+	}
+	offsetsEnd, err := f.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return err
+	}
 
 	ib.serializeUpdate(SerializeUpdate{
 		Event: SerializeEvent_BeginPhase,
@@ -455,6 +477,7 @@ func (ib *IndexBuilder) writeCatalog(filename string) error {
 		N:     len(ib.injested),
 	})
 
+	foffset := uint32(offsetsEnd)
 	for _, injested := range ib.injested {
 		if injested.Err != nil {
 			continue
@@ -486,7 +509,7 @@ func (ib *IndexBuilder) writeCatalog(filename string) error {
 	}
 
 	// Go back and write out the completed offsets table
-	if _, err = f.Seek(4, io.SeekStart); err != nil {
+	if _, err = f.Seek(hdrEnd, io.SeekStart); err != nil {
 		return err
 	}
 
@@ -532,17 +555,19 @@ func writeIndexOffsetsFile(wordCorpusOffsets []serializedWordIndexOffset, filena
 	}
 
 	// File format of the index offsets file
-	// 0x00: u32 Version number (currently 1)
-	// 0x04: u32 Number of entries in the table
-	// 0x08: u32 Index of word 0 in the words stringset
-	// 0x0C: s64 Byte offset in the index for word 0 matches
-	// 0x14: u32 Index of word 1 in the words stringset
-	// 0x18: s64 Byte offset in the index for word 1 matches
+	// 0x00: u32 Magic number 'WRDO'
+	// 0x04: u32 Version number (currently 1)
+	// 0x08: u32 Number of entries in the table
+	// 0x0C: u32 Index of word 0 in the words stringset
+	// 0x10: s64 Byte offset in the index for word 0 matches
+	// 0x18: u32 Index of word 1 in the words stringset
+	// 0x1C: s64 Byte offset in the index for word 1 matches
 	// ....:
 	// ....: u32 Index of word N-1 in the words stringset
 	// ....: s64 Byte offset in the index for word N-1 matches
 	buf := &bytes.Buffer{}
 	hdr := serializedWordOffsetHeader{
+		Magic:      wordOffsetMagic,
 		Version:    1,
 		NumEntries: uint32(len(wordCorpusOffsets)),
 	}

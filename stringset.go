@@ -10,7 +10,10 @@ import (
 
 var errTooBigToSave = errors.New("the capacity of the stringset exceeds disk format")
 
+const stringSetMagic uint32 = 'S'<<24 | 'T'<<16 | 'R'<<8 | 'S'
+
 type serializedStringSetHeader struct {
+	Magic    uint32
 	Version  uint32 // currently 1
 	NStrings uint32
 	MaxLen   uint16
@@ -73,6 +76,7 @@ func (ss *StringSet) Serialize(outpath string) error {
 	out.Grow(20 * len(strings)) // Assume avg string length is 20 bytes
 
 	hdr := serializedStringSetHeader{
+		Magic:    stringSetMagic,
 		Version:  1,
 		NStrings: uint32(len(strings)),
 		MaxLen:   uint16(maxlen),

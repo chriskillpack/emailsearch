@@ -8,6 +8,8 @@ import (
 	"slices"
 )
 
+const trieMagic uint32 = 'T'<<24 | 'R'<<16 | 'I'<<8 | 'E'
+
 type TrieNode struct {
 	Children map[rune]*TrieNode
 	IsWord   bool
@@ -15,6 +17,13 @@ type TrieNode struct {
 
 type Trie struct {
 	Root *TrieNode
+	N    int // Number of nodes in Trie
+}
+
+type serializedTrieHeader struct {
+	Magic    uint32
+	Version  uint32
+	NumNodes uint32
 }
 
 // Returns the root of a new word
@@ -24,17 +33,21 @@ func NewTrie() *Trie {
 			Children: make(map[rune]*TrieNode),
 			IsWord:   false,
 		},
+		N: 1,
 	}
 }
 
 func DeserializeTrie(data []byte) (*Trie, error) {
 	buf := bytes.NewReader(data)
 
+	var hdr serializedTrieHeader
+	if err := binary.Read(buf, binary.BigEndian, &hdr); err != nil {
+		return nil, err
+	}
+
 	// Only version 1 is supported
-	var version uint32
-	binary.Read(buf, binary.BigEndian, &version)
-	if version != 1 {
-		return nil, fmt.Errorf("unsupported version number %d", version)
+	if hdr.Magic != trieMagic || hdr.Version != 1 {
+		return nil, fmt.Errorf("unsupported version number %d", hdr.Version)
 	}
 
 	return &Trie{
@@ -51,6 +64,7 @@ func (t *Trie) InsertWord(w string) {
 				Children: make(map[rune]*TrieNode),
 				IsWord:   false,
 			}
+			t.N += 1
 		}
 		current = current.Children[ch]
 	}
@@ -102,12 +116,24 @@ func (t *Trie) collectWords(node *TrieNode, prefix string, results *[]string) {
 // layout for a given trie. This is because Go iterates over map keys in random
 // order.
 func (t *Trie) Serialize() ([]byte, error) {
+	if int(uint32(t.N)) != t.N {
+		panic("Number of trie nodes exceeds file format limits")
+	}
+
 	buf := &bytes.Buffer{}
 
 	// Trie file format (Big Endian)
-	// 0x00: u32 Version Number, currently 1
-	// 0x04: Tree structure (see serializeNode)
-	binary.Write(buf, binary.BigEndian, uint32(1))
+	// 0x00: u32 Magic Number 'TRIE'
+	// 0x04: u32 Version Number, currently 1
+	// 0x08: Number of serialized nodes
+	// 0x0C: Tree structure (see serializeNode)
+	hdr := serializedTrieHeader{
+		Magic:    trieMagic,
+		Version:  1,
+		NumNodes: uint32(t.N),
+	}
+	binary.Write(buf, binary.BigEndian, &hdr)
+
 	st := t.serializeNode(t.Root)
 	n, err := buf.Write(st)
 	if n < len(st) || err != nil {

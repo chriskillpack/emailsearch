@@ -22,7 +22,10 @@ type serializedMatch struct {
 	// Followed by NumOffsets of uint32
 }
 
+const indexMagic uint32 = 'I'<<24 | 'N'<<16 | 'D'<<8 | 'X'
+
 type serializedIndexHeader struct {
+	Magic      uint32
 	Version    uint32
 	NumEntries uint64 // Number of words in the index
 	CorpusSize uint32 // Number of documents the index was built from
@@ -31,7 +34,10 @@ type serializedIndexHeader struct {
 	//Entry      []serializedWord
 }
 
+const wordOffsetMagic uint32 = 'W'<<24 | 'R'<<16 | 'D'<<8 | 'O'
+
 type serializedWordOffsetHeader struct {
+	Magic      uint32
 	Version    uint32
 	NumEntries uint32
 }
@@ -39,6 +45,14 @@ type serializedWordOffsetHeader struct {
 type serializedWordIndexOffset struct {
 	WordIndex uint32 // Index into the word string table
 	Offset    int64  // Binary offset into the index file
+}
+
+const catalogMagic uint32 = 'C'<<24 | 'T'<<16 | 'L'<<8 | 'G'
+
+type serializedCatalogHeader struct {
+	Magic      uint32
+	Version    uint32
+	NumEntries uint32
 }
 
 type catalogContentEntry struct {
@@ -100,7 +114,12 @@ func LoadIndexFromDisk(indexdir string) (*Index, error) {
 	}
 	// Read in the index header
 	var header serializedIndexHeader
-	binary.Read(idx.indexRdr, binary.BigEndian, &header)
+	if err = binary.Read(idx.indexRdr, binary.BigEndian, &header); err != nil {
+		return nil, err
+	}
+	if header.Magic != indexMagic || header.Version != 1 {
+		return nil, fmt.Errorf("unsupported index version number %d", header.Version)
+	}
 	idx.CorpusSize = int(header.CorpusSize)
 
 	// Memory map the catalog in
@@ -357,8 +376,8 @@ func loadStringTable(filename string) ([]string, error) {
 		return nil, err
 	}
 
-	if hdr.Version != 1 {
-		return nil, fmt.Errorf("invalid file version %d", hdr.Version)
+	if hdr.Magic != stringSetMagic || hdr.Version != 1 {
+		return nil, fmt.Errorf("unsupported string set version number %d", hdr.Version)
 	}
 
 	strings := make([]string, hdr.NStrings)
@@ -388,6 +407,9 @@ func loadOffsetsTable(filename string) ([]serializedWordIndexOffset, error) {
 	if err := binary.Read(buf, binary.BigEndian, &hdr); err != nil {
 		return nil, err
 	}
+	if hdr.Magic != wordOffsetMagic || hdr.Version != 1 {
+		return nil, fmt.Errorf("unsupported offsets version number %d", hdr.Version)
+	}
 
 	offsets := make([]serializedWordIndexOffset, hdr.NumEntries)
 	if err := binary.Read(buf, binary.BigEndian, offsets); err != nil {
@@ -400,12 +422,15 @@ func loadOffsetsTable(filename string) ([]serializedWordIndexOffset, error) {
 // loadCatalogHeader reads in the compressed content catalog header which
 // stores the offsets and uncompressed lengths of all injested content.
 func (idx *Index) loadCatalogHeader(r io.Reader) error {
-	var ni uint32
-	if err := binary.Read(r, binary.BigEndian, &ni); err != nil {
+	var hdr serializedCatalogHeader
+	if err := binary.Read(r, binary.BigEndian, &hdr); err != nil {
 		return err
 	}
+	if hdr.Magic != catalogMagic || hdr.Version != 1 {
+		return fmt.Errorf("unsupported catalog version number %d", hdr.Version)
+	}
 
-	idx.contentEntry = make([]catalogContentEntry, ni)
+	idx.contentEntry = make([]catalogContentEntry, hdr.NumEntries)
 	if err := binary.Read(r, binary.BigEndian, idx.contentEntry); err != nil {
 		return err
 	}

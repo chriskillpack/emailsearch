@@ -169,12 +169,14 @@ func (s *Server) retrieveEmail() http.HandlerFunc {
 
 		highlights, err := decodeEmailURL(urlData)
 		if err != nil {
+			s.logger.Printf("Failed to decode email URL - %s", err)
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 			return
 		}
 
 		content, filename, ok := s.Index.CatalogContent(highlights.FilenameIndex)
 		if !ok {
+			s.logger.Printf("Failed to find content for file index %d\n", highlights.FilenameIndex)
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 			return
 		}
