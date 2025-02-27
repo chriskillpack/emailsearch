@@ -52,6 +52,7 @@ func DeserializeTrie(data []byte) (*Trie, error) {
 
 	return &Trie{
 		Root: deserializeNode(buf, 0),
+		N:    int(hdr.NumNodes),
 	}, nil
 }
 

@@ -100,7 +100,7 @@ func LoadIndexFromDisk(indexdir string) (*Index, error) {
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println("Loaded prefix tree")
+	fmt.Printf("Loaded prefix tree: %d nodes\n", idx.prefixTree.N)
 
 	// Memory map the index in
 	if idx.indexRdr, err = mmap.Open(filepath.Join(indexdir, CorpusIndex)); err != nil {
