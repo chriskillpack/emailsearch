@@ -94,10 +94,10 @@ Start the web server
 
 ```
 $ go run ./cmd/search --indexdir=email_index
-Loaded filename strings table: 517401 entries
-Loaded words strings table: 595111 entries
-Loaded word offsets table: 595111 entries
-Loaded prefix tree
+Loaded filename strings table: 517401 entries (36.0 MB)
+Loaded words strings table: 595111 entries (10.1 MB)
+Loaded word offsets table: 595111 entries (22.7 MB)
+Loaded prefix tree: 3182208 nodes (595 MB)
 2025/02/27 13:55:58 Ready, took 618.383834ms to load index
 
 ```

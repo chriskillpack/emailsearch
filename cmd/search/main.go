@@ -23,7 +23,7 @@ func main() {
 	flag.Parse()
 
 	start := time.Now()
-	idx, err := emailsearch.LoadIndexFromDisk(*flagIndexDir)
+	idx, err := emailsearch.LoadIndexFromDisk(*flagIndexDir, os.Stdout)
 	if err != nil {
 		log.Fatal(err)
 	}
