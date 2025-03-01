@@ -1,10 +1,9 @@
 package emailsearch
 
 import (
-	"bytes"
+	"bufio"
 	"compress/gzip"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -377,15 +376,15 @@ func filterFunc(x []string, f func(string) bool) []string {
 // loadStringTable loads a serialized string table from disk and returns it
 // as []string. The order of entries in []string matches that in the file.
 func loadStringTable(filename string) ([]string, error) {
-	data, err := os.ReadFile(filename)
+	f, err := os.Open(filename)
 	if err != nil {
 		return nil, err
 	}
+	defer f.Close()
 
-	buf := bytes.NewBuffer(data)
-
+	rdr := bufio.NewReader(f)
 	hdr := serializedStringSetHeader{}
-	if err = binary.Read(buf, binary.BigEndian, &hdr); err != nil {
+	if err = binary.Read(rdr, binary.BigEndian, &hdr); err != nil {
 		return nil, err
 	}
 
@@ -397,12 +396,12 @@ func loadStringTable(filename string) ([]string, error) {
 	scratch := make([]byte, hdr.MaxLen)
 
 	for i := range hdr.NStrings {
-		slen, err := binary.ReadUvarint(buf)
+		slen, err := binary.ReadUvarint(rdr)
 		if err != nil {
 			return nil, err
 		}
 
-		if _, err := io.ReadFull(buf, scratch[:slen]); err != nil {
+		if _, err := io.ReadFull(rdr, scratch[:slen]); err != nil {
 			return nil, err
 		}
 		strings[i] = string(scratch[:slen])
@@ -412,14 +411,15 @@ func loadStringTable(filename string) ([]string, error) {
 }
 
 func loadOffsetsTable(filename string) ([]serializedWordIndexOffset, error) {
-	data, err := os.ReadFile(filename)
+	f, err := os.Open(filename)
 	if err != nil {
 		return nil, err
 	}
+	defer f.Close()
 
-	buf := bytes.NewBuffer(data)
+	rdr := bufio.NewReader(f)
 	hdr := serializedWordOffsetHeader{}
-	if err := binary.Read(buf, binary.BigEndian, &hdr); err != nil {
+	if err := binary.Read(rdr, binary.BigEndian, &hdr); err != nil {
 		return nil, err
 	}
 	if hdr.Magic != wordOffsetMagic || hdr.Version != 1 {
@@ -427,7 +427,7 @@ func loadOffsetsTable(filename string) ([]serializedWordIndexOffset, error) {
 	}
 
 	offsets := make([]serializedWordIndexOffset, hdr.NumEntries)
-	if err := binary.Read(buf, binary.BigEndian, offsets); err != nil {
+	if err := binary.Read(rdr, binary.BigEndian, offsets); err != nil {
 		return nil, err
 	}
 
@@ -455,15 +455,14 @@ func (idx *Index) loadCatalogHeader(r io.Reader) error {
 // loadPrefixTree loads a serialized trie data structure into memory and returns
 // the Trie instance.
 func loadPrefixTree(filename string) (*Trie, error) {
-	data, err := os.ReadFile(filename)
+	f, err := os.Open(filename)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
-		}
 		return nil, err
 	}
+	defer f.Close()
 
-	trie, err := DeserializeTrie(data)
+	rdr := bufio.NewReader(f)
+	trie, err := DeserializeTrie(rdr)
 	if err != nil {
 		return nil, err
 	}

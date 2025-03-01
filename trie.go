@@ -26,6 +26,11 @@ type serializedTrieHeader struct {
 	NumNodes uint32
 }
 
+type ReadRuneReader interface {
+	io.Reader
+	io.RuneReader
+}
+
 // Returns the root of a new word
 func NewTrie() *Trie {
 	return &Trie{
@@ -37,11 +42,9 @@ func NewTrie() *Trie {
 	}
 }
 
-func DeserializeTrie(data []byte) (*Trie, error) {
-	buf := bytes.NewReader(data)
-
+func DeserializeTrie(rdr ReadRuneReader) (*Trie, error) {
 	var hdr serializedTrieHeader
-	if err := binary.Read(buf, binary.BigEndian, &hdr); err != nil {
+	if err := binary.Read(rdr, binary.BigEndian, &hdr); err != nil {
 		return nil, err
 	}
 
@@ -51,7 +54,7 @@ func DeserializeTrie(data []byte) (*Trie, error) {
 	}
 
 	return &Trie{
-		Root: deserializeNode(buf, 0),
+		Root: deserializeNode(rdr, 0),
 		N:    int(hdr.NumNodes),
 	}, nil
 }
@@ -179,17 +182,17 @@ func (t *Trie) serializeNode(node *TrieNode) []byte {
 	return buf.Bytes()
 }
 
-func deserializeNode(br *bytes.Reader, level int) *TrieNode {
+func deserializeNode(rdr ReadRuneReader, level int) *TrieNode {
 	node := &TrieNode{}
-	binary.Read(br, binary.BigEndian, &node.IsWord)
+	binary.Read(rdr, binary.BigEndian, &node.IsWord)
 
 	var nc uint16
-	binary.Read(br, binary.BigEndian, &nc)
+	binary.Read(rdr, binary.BigEndian, &nc)
 	node.Children = make(map[rune]*TrieNode, nc)
 
 	for range nc {
-		r, _, _ := br.ReadRune()
-		node.Children[r] = deserializeNode(br, level+1)
+		r, _, _ := rdr.ReadRune()
+		node.Children[r] = deserializeNode(rdr, level+1)
 	}
 
 	return node

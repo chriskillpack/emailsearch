@@ -1,6 +1,7 @@
 package emailsearch
 
 import (
+	"bytes"
 	"slices"
 	"sort"
 	"testing"
@@ -99,7 +100,8 @@ func TestTrieSerialize(t *testing.T) {
 	if err != nil {
 		t.Errorf("Error serializing trie - %s", err)
 	}
-	trie2, err := DeserializeTrie(strie)
+
+	trie2, err := DeserializeTrie(bytes.NewReader(strie))
 	if err != nil {
 		t.Errorf("Error deserializing trie - %s", err)
 	}
