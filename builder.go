@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"unicode"
+	"unsafe"
 )
 
 const (
@@ -450,6 +451,8 @@ func (ib *IndexBuilder) writeCatalog(filename string) error {
 	}
 	defer f.Close()
 
+	wr := bufio.NewWriter(f)
+
 	// File format of the catalog
 	// 0x00: u32 Magic number 'CTLG'
 	// 0x04: u32 Version number
@@ -473,29 +476,18 @@ func (ib *IndexBuilder) writeCatalog(filename string) error {
 		Version:    1,
 		NumEntries: uint32(len(ib.injested)),
 	}
-	if err := binary.Write(f, binary.BigEndian, &hdr); err != nil {
+	if err := binary.Write(wr, binary.BigEndian, &hdr); err != nil {
 		return err
 	}
-	hdrEnd, err := f.Seek(0, io.SeekCurrent)
-	if err != nil {
-		return err
-	}
-	offsets := make([]uint32, len(ib.injested)*2)
-	if err := binary.Write(f, binary.BigEndian, offsets); err != nil { // write out as a placeholder
-		return err
-	}
-	offsetsEnd, err := f.Seek(0, io.SeekCurrent)
-	if err != nil {
-		return err
-	}
+	hdrSize := int(unsafe.Sizeof(hdr))
 
-	ib.serializeUpdate(SerializeUpdate{
-		Event: SerializeEvent_BeginPhase,
-		Phase: SerializePhase_Catalog,
-		N:     len(ib.injested),
-	})
+	// Compute the offsets for the compressed content
+	offlens := make([]uint32, len(ib.injested)*2)
+	// offset holds the byte offset into the file of the initial byte of the
+	// first injested file.
+	offset := hdrSize + len(ib.injested)*2*4 // *4 for byte size of a uint32
 
-	foffset := uint32(offsetsEnd)
+	// Walk the injested content to fill out the offlens table
 	for _, injested := range ib.injested {
 		if injested.Err != nil {
 			continue
@@ -506,18 +498,33 @@ func (ib *IndexBuilder) writeCatalog(filename string) error {
 		}
 
 		fidx, _ := ib.filenames.Index(injested.Filename)
-		offsets[fidx*2+0] = foffset
-		offsets[fidx*2+1] = uint32(injested.Len)
+		offlens[fidx*2+0] = uint32(offset)
+		offlens[fidx*2+1] = uint32(injested.Len)
 
-		if _, err := f.Write(injested.Compressed); err != nil {
-			return err
-		}
-
-		// Overflow check on the offset
-		if foffset+uint32(len(injested.Compressed)) < foffset {
+		// Check that advancing offset by data length does not overflow uint32
+		if uint32(offset+len(injested.Compressed)) < uint32(offset) {
 			panic("offset overflow")
 		}
-		foffset += uint32(len(injested.Compressed))
+		offset += len(injested.Compressed)
+	}
+
+	// Write out the offlens table
+	if err := binary.Write(wr, binary.BigEndian, offlens); err != nil {
+		return err
+	}
+
+	ib.serializeUpdate(SerializeUpdate{
+		Event: SerializeEvent_BeginPhase,
+		Phase: SerializePhase_Catalog,
+		N:     len(ib.injested),
+	})
+
+	// Now walk the injested files again, this time writing out their content
+	for _, injested := range ib.injested {
+		_, err := wr.Write(injested.Compressed)
+		if err != nil {
+			return err
+		}
 
 		ib.serializeUpdate(SerializeUpdate{
 			Event: SerializeEvent_ProgressPhase,
@@ -526,17 +533,12 @@ func (ib *IndexBuilder) writeCatalog(filename string) error {
 		})
 	}
 
-	// Go back and write out the completed offsets table
-	if _, err = f.Seek(hdrEnd, io.SeekStart); err != nil {
-		return err
-	}
-
 	ib.serializeUpdate(SerializeUpdate{
 		Event: SerializeEvent_EndPhase,
 		Phase: SerializePhase_Catalog,
 	})
 
-	return binary.Write(f, binary.BigEndian, offsets)
+	return wr.Flush()
 }
 
 func (ib *IndexBuilder) buildAndWritePrefixTree(filename string) error {
