@@ -1,6 +1,7 @@
 package emailsearch
 
 import (
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"encoding/binary"
@@ -590,6 +591,14 @@ func (ib *IndexBuilder) writeIndexOffsetsFile(wordCorpusOffsets []serializedWord
 	}
 	ib.serializeUpdate(update)
 
+	f, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	wr := bufio.NewWriter(f)
+
 	// File format of the index offsets file
 	// 0x00: u32 Magic number 'WRDO'
 	// 0x04: u32 Version number (currently 1)
@@ -601,25 +610,22 @@ func (ib *IndexBuilder) writeIndexOffsetsFile(wordCorpusOffsets []serializedWord
 	// ....:
 	// ....: u32 Index of word N-1 in the words stringset
 	// ....: s64 Byte offset in the index for word N-1 matches
-	buf := &bytes.Buffer{}
 	hdr := serializedWordOffsetHeader{
 		Magic:      wordOffsetMagic,
 		Version:    1,
 		NumEntries: uint32(len(wordCorpusOffsets)),
 	}
-	if err := binary.Write(buf, binary.BigEndian, &hdr); err != nil {
+	if err := binary.Write(wr, binary.BigEndian, &hdr); err != nil {
 		return err
 	}
-	if err := binary.Write(buf, binary.BigEndian, wordCorpusOffsets); err != nil {
+	if err := binary.Write(wr, binary.BigEndian, wordCorpusOffsets); err != nil {
 		return err
 	}
-
-	err := os.WriteFile(filename, buf.Bytes(), 0666)
 
 	update.Event = SerializeEvent_EndPhase
 	ib.serializeUpdate(update)
 
-	return err
+	return wr.Flush()
 }
 
 // Reads everything from the Reader r into data starting from the front. It
