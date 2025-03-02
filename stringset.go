@@ -1,7 +1,7 @@
 package emailsearch
 
 import (
-	"bytes"
+	"bufio"
 	"encoding/binary"
 	"errors"
 	"math"
@@ -72,8 +72,13 @@ func (ss *StringSet) Serialize(outpath string) error {
 		return errTooBigToSave
 	}
 
-	out := &bytes.Buffer{}
-	out.Grow(20 * len(strings)) // Assume avg string length is 20 bytes
+	f, err := os.Create(outpath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	wr := bufio.NewWriter(f)
 
 	hdr := serializedStringSetHeader{
 		Magic:    stringSetMagic,
@@ -81,7 +86,7 @@ func (ss *StringSet) Serialize(outpath string) error {
 		NStrings: uint32(len(strings)),
 		MaxLen:   uint16(maxlen),
 	}
-	if err := binary.Write(out, binary.BigEndian, &hdr); err != nil {
+	if err := binary.Write(wr, binary.BigEndian, &hdr); err != nil {
 		return err
 	}
 
@@ -89,11 +94,16 @@ func (ss *StringSet) Serialize(outpath string) error {
 	for _, str := range strings {
 		// Write out length as a varint
 		n := binary.PutUvarint(scratch[:], uint64(len(str)))
-		out.Write(scratch[0:n])
+		if _, err := wr.Write(scratch[0:n]); err != nil {
+			return err
+		}
+
 		// The WriteString only writes out the contents of the string, there is
 		// no preceding fields or trailing zero byte.
-		out.WriteString(str)
+		if _, err := wr.WriteString(str); err != nil {
+			return err
+		}
 	}
 
-	return os.WriteFile(outpath, out.Bytes(), 0666)
+	return wr.Flush() // close will be called after in the defer
 }
