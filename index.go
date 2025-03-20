@@ -402,8 +402,10 @@ func loadStringTable(filename string) ([]string, error) {
 			return nil, err
 		}
 
-		buf.Read(scratch[0:slen])
-		strings[i] = string(scratch[0:slen])
+		if _, err := io.ReadFull(buf, scratch[:slen]); err != nil {
+			return nil, err
+		}
+		strings[i] = string(scratch[:slen])
 	}
 
 	return strings, nil
