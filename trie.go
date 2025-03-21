@@ -1,10 +1,11 @@
 package emailsearch
 
 import (
-	"bytes"
+	"bufio"
 	"encoding/binary"
 	"fmt"
 	"io"
+	"maps"
 	"slices"
 )
 
@@ -116,15 +117,13 @@ func (t *Trie) collectWords(node *TrieNode, prefix string, results *[]string) {
 	}
 }
 
-// Important: Serialize() is not guaranteed to be generate the same binary
-// layout for a given trie. This is because Go iterates over map keys in random
-// order.
-func (t *Trie) Serialize() ([]byte, error) {
+// Serialize the trie into an io.Writer
+func (t *Trie) Serialize(w io.Writer) error {
 	if int(uint32(t.N)) != t.N {
 		panic("Number of trie nodes exceeds file format limits")
 	}
 
-	buf := &bytes.Buffer{}
+	buf := bufio.NewWriter(w)
 
 	// Trie file format (Big Endian)
 	// 0x00: u32 Magic Number 'TRIE'
@@ -136,23 +135,18 @@ func (t *Trie) Serialize() ([]byte, error) {
 		Version:  1,
 		NumNodes: uint32(t.N),
 	}
-	binary.Write(buf, binary.BigEndian, &hdr)
-
-	st := t.serializeNode(t.Root)
-	n, err := buf.Write(st)
-	if n < len(st) || err != nil {
-		if n < len(st) {
-			return nil, io.ErrShortWrite
-		}
-		return nil, err
+	if err := binary.Write(buf, binary.BigEndian, &hdr); err != nil {
+		return err
 	}
 
-	return buf.Bytes(), nil
+	if err := t.serializeNode(t.Root, buf); err != nil {
+		return err
+	}
+
+	return buf.Flush()
 }
 
-func (t *Trie) serializeNode(node *TrieNode) []byte {
-	buf := &bytes.Buffer{}
-
+func (t *Trie) serializeNode(node *TrieNode, buf *bufio.Writer) error {
 	// Trie node file format
 	// All offsets below are relative to the start of the root node in the file.
 	// runes, Go's type for a character in a string, are utf-8 encoded.
@@ -164,22 +158,25 @@ func (t *Trie) serializeNode(node *TrieNode) []byte {
 	// ...
 	// ...                : child N-1, rune (utf-8 encoded)
 	// ...                : subtree under child N-1
-	binary.Write(buf, binary.BigEndian, node.IsWord)
-	nc := uint16(len(node.Children))
-	binary.Write(buf, binary.BigEndian, nc)
-
-	keys := make([]rune, 0, len(node.Children))
-	for r := range node.Children {
-		keys = append(keys, r)
+	switch node.IsWord {
+	case true:
+		buf.WriteByte(1)
+	case false:
+		buf.WriteByte(0)
 	}
-	slices.Sort(keys)
 
-	for _, r := range keys {
+	var p [2]byte
+	binary.BigEndian.PutUint16(p[:], uint16(len(node.Children)))
+	buf.Write(p[:])
+
+	for _, r := range slices.Sorted(maps.Keys(node.Children)) {
 		buf.WriteRune(r)
-		buf.Write(t.serializeNode(node.Children[r]))
+		if err := t.serializeNode(node.Children[r], buf); err != nil {
+			return err
+		}
 	}
 
-	return buf.Bytes()
+	return nil
 }
 
 func deserializeNode(rdr ReadRuneReader, level int) *TrieNode {

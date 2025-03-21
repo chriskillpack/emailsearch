@@ -556,12 +556,17 @@ func (ib *IndexBuilder) buildAndWritePrefixTree(filename string) error {
 		trie.InsertWord(word)
 	}
 
-	data, err := trie.Serialize()
+	// Write out the prefix tree
+	f, err := os.Create(filename)
 	if err != nil {
 		return err
 	}
+	defer f.Close()
 
-	err = os.WriteFile(filename, data, 0666)
+	err = trie.Serialize(f)
+	if err != nil {
+		return err
+	}
 
 	update.Event = SerializeEvent_EndPhase
 	ib.serializeUpdate(update)
