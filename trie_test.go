@@ -96,12 +96,13 @@ func TestTrieSerialize(t *testing.T) {
 	trie.InsertWord("apple")
 	trie.InsertWord("ape")
 
-	strie, err := trie.Serialize()
+	buf := &bytes.Buffer{}
+	err := trie.Serialize(buf)
 	if err != nil {
 		t.Errorf("Error serializing trie - %s", err)
 	}
 
-	trie2, err := DeserializeTrie(bytes.NewReader(strie))
+	trie2, err := DeserializeTrie(buf)
 	if err != nil {
 		t.Errorf("Error deserializing trie - %s", err)
 	}
