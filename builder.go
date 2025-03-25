@@ -17,6 +17,8 @@ import (
 	"sync"
 	"unicode"
 	"unsafe"
+
+	"github.com/chriskillpack/compressedtrie"
 )
 
 const (
@@ -549,11 +551,11 @@ func (ib *IndexBuilder) buildAndWritePrefixTree(filename string) error {
 	}
 	ib.serializeUpdate(update)
 
-	trie := NewTrie()
+	trie := compressedtrie.NewTree()
 
 	words, _ := ib.words.Flatten()
 	for _, word := range words {
-		trie.InsertWord(word)
+		trie.Insert(word)
 	}
 
 	// Write out the prefix tree

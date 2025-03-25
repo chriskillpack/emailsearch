@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/chriskillpack/compressedtrie"
 	"github.com/go-mmap/mmap"
 )
 
@@ -62,7 +63,7 @@ type Index struct {
 	offsets        []serializedWordIndexOffset
 	contentEntry   []catalogContentEntry
 	wordsToOffsets map[string]int64
-	prefixTree     *Trie
+	prefixTree     *compressedtrie.Tree
 	CorpusSize     int
 
 	indexRdr   *mmap.File // The search index is memory mapped
@@ -335,7 +336,7 @@ func (idx *Index) Prefix(prefix string, n int) []string {
 		return nil
 	}
 
-	matches := idx.prefixTree.WithPrefix(strings.ToLower(prefix))
+	matches := idx.prefixTree.FindWordsWithPrefix(strings.ToLower(prefix))
 
 	// Filter out stop words
 	matches = filterFunc(matches, func(s string) bool { return !isStopWord(s) })
@@ -454,7 +455,7 @@ func (idx *Index) loadCatalogHeader(r io.Reader) error {
 
 // loadPrefixTree loads a serialized trie data structure into memory and returns
 // the Trie instance.
-func loadPrefixTree(filename string) (*Trie, error) {
+func loadPrefixTree(filename string) (*compressedtrie.Tree, error) {
 	f, err := os.Open(filename)
 	if err != nil {
 		return nil, err
@@ -462,7 +463,7 @@ func loadPrefixTree(filename string) (*Trie, error) {
 	defer f.Close()
 
 	rdr := bufio.NewReader(f)
-	trie, err := DeserializeTrie(rdr)
+	trie, err := compressedtrie.DeserializeTree(rdr)
 	if err != nil {
 		return nil, err
 	}

@@ -1,5 +1,7 @@
 github.com/chengxilo/virtualterm v1.0.4 h1:Z6IpERbRVlfB8WkOmtbHiDbBANU7cimRIof7mk9/PwM=
 github.com/chengxilo/virtualterm v1.0.4/go.mod h1:DyxxBZz/x1iqJjFxTFcr6/x+jSpqN0iwWCOK1q10rlY=
+github.com/chriskillpack/compressedtrie v0.1.2 h1:+UfXUWtF1yEAPNA0mRG+DxNCTycChgY55K0KYC1gxgU=
+github.com/chriskillpack/compressedtrie v0.1.2/go.mod h1:oZIzXIkGXn6yyWlBxTmw+AXQqkWoS92ZNpu89YXFu9s=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/go-mmap/mmap v0.7.0 h1:+h1n06sZw0IWBwL9YDzTomNNXxM4LH/l+HVpGaTC+qk=
